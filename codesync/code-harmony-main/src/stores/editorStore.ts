@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { apiService } from '@/lib/api';
-import type { Document as ApiDocument, AISuggestionResponse } from '@/lib/api';
+import { apiService } from '../lib/api';
+import type { Document as ApiDocument, AISuggestionResponse } from '../lib/api';
 
 // Language detection function
 function detectLanguage(content: string): string {

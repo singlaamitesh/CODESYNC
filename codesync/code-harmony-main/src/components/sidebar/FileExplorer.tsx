@@ -11,25 +11,25 @@ import {
   RefreshCw,
   Trash2,
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+} from '../ui/dropdown-menu';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogFooter,
-} from '@/components/ui/dialog';
-import { useEditorStore } from '@/stores/editorStore';
-import { cn } from '@/lib/utils';
-import { toast } from '@/hooks/use-toast';
-import { apiService } from '@/lib/api';
+} from '../ui/dialog';
+import { useEditorStore } from '../../stores/editorStore';
+import { cn } from '../../lib/utils';
+import { toast } from '../../hooks/use-toast';
+import { apiService } from '../../lib/api';
 
 interface FileItem {
   id: string;
@@ -140,8 +140,13 @@ const FileExplorer: React.FC = () => {
     }
 
     try {
+      setIsLoading(true);
       await createDocument(newFileName, '# New document\n\n// Start coding here...');
-      await loadDocuments(); // Refresh the documents list
+      // Wait a bit before refreshing to ensure backend has processed the creation
+      setTimeout(async () => {
+        await loadDocuments();
+        setIsLoading(false);
+      }, 500);
       setShowNewFileDialog(false);
       setNewFileName('');
       toast({
@@ -149,6 +154,8 @@ const FileExplorer: React.FC = () => {
         description: `Created "${newFileName}"`,
       });
     } catch (error) {
+      console.error('Failed to create document:', error);
+      setIsLoading(false);
       toast({
         title: "Error",
         description: "Failed to create document",
