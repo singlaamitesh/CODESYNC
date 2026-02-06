@@ -140,10 +140,12 @@
 Located in: `/fastapi_backend/.env`
 
 ```env
-OPENROUTER_API_KEY=sk-or-v1-...
-DATABASE_URL=postgresql://amitesh@localhost:5432/codesync_db
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+DATABASE_URL=postgresql://username:password@localhost:5432/database_name
 REDIS_URL=redis://localhost:6379
 ```
+
+**Note:** Copy `.env.example` to `.env` and fill in your actual values.
 
 ---
 
