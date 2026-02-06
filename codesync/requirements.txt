@@ -1,0 +1,31 @@
+# Django Core
+Django==5.0.6
+djangorestframework==3.15.1
+
+# Database (using latest psycopg for Python 3.14 compatibility)
+psycopg[binary]>=3.2.10
+
+# WebSockets & Real-time
+channels==4.1.0
+channels-redis==4.2.0
+daphne==4.1.2
+
+# Celery & Redis
+celery==5.4.0
+redis==5.0.8
+
+# CORS
+django-cors-headers==4.4.0
+
+# Environment Variables
+python-dotenv==1.0.1
+
+# HTTP Requests
+requests==2.32.3
+
+# WebSocket Server
+websockets==13.1
+
+# Optional: AI Libraries (if needed locally)
+# openai==1.40.0
+# google-generativeai==0.7.2

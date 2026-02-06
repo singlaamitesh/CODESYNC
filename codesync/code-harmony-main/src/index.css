@@ -1,0 +1,172 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* CodeSync AI Design System - VS Code-inspired dark theme */
+
+@layer base {
+  :root {
+    --background: 240 10% 12%;
+    --foreground: 220 14% 90%;
+
+    --card: 240 10% 14%;
+    --card-foreground: 220 14% 90%;
+
+    --popover: 240 10% 16%;
+    --popover-foreground: 220 14% 90%;
+
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 240 10% 20%;
+    --secondary-foreground: 220 14% 90%;
+
+    --muted: 240 10% 18%;
+    --muted-foreground: 220 10% 55%;
+
+    --accent: 240 10% 22%;
+    --accent-foreground: 220 14% 90%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 76% 46%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    --info: 199 89% 48%;
+    --info-foreground: 0 0% 100%;
+
+    --border: 240 10% 22%;
+    --input: 240 10% 20%;
+    --ring: 217 91% 60%;
+
+    --radius: 0.5rem;
+
+    /* Editor specific */
+    --editor-bg: 240 10% 10%;
+    --editor-gutter: 240 10% 14%;
+    --editor-line-highlight: 217 91% 60% / 0.08;
+    --editor-selection: 217 91% 60% / 0.3;
+
+    /* Sidebar */
+    --sidebar-background: 240 10% 11%;
+    --sidebar-foreground: 220 14% 75%;
+    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 10% 18%;
+    --sidebar-accent-foreground: 220 14% 90%;
+    --sidebar-border: 240 10% 18%;
+    --sidebar-ring: 217 91% 60%;
+
+    /* Status colors */
+    --status-online: 142 76% 46%;
+    --status-away: 38 92% 50%;
+    --status-offline: 240 10% 40%;
+
+    /* AI accent */
+    --ai-accent: 280 80% 60%;
+    --ai-glow: 280 80% 60% / 0.3;
+
+    /* Cursor colors for collaborators */
+    --cursor-1: 0 84% 60%;
+    --cursor-2: 142 76% 46%;
+    --cursor-3: 280 80% 60%;
+    --cursor-4: 38 92% 50%;
+    --cursor-5: 199 89% 48%;
+  }
+
+  .dark {
+    --background: 240 10% 12%;
+    --foreground: 220 14% 90%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+}
+
+@layer utilities {
+  .glow-primary {
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.3),
+                0 0 40px hsl(var(--primary) / 0.1);
+  }
+
+  .glow-ai {
+    box-shadow: 0 0 20px hsl(var(--ai-accent) / 0.4),
+                0 0 40px hsl(var(--ai-accent) / 0.2);
+  }
+
+  .glow-success {
+    box-shadow: 0 0 10px hsl(var(--success) / 0.4);
+  }
+
+  .glass {
+    background: hsl(var(--card) / 0.8);
+    backdrop-filter: blur(12px);
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 3px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+
+  .animate-pulse-subtle {
+    animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  @keyframes pulse-subtle {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.7;
+    }
+  }
+
+  .animate-typing {
+    animation: typing 1.5s infinite;
+  }
+
+  @keyframes typing {
+    0%, 100% {
+      opacity: 0.3;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+}
