@@ -332,15 +332,63 @@ class YjsServer:
             except:
                 pass
     
+    async def handle_http_request(self, path: str, headers: dict) -> tuple[int, dict, bytes]:
+        """Handle basic HTTP requests for health checks"""
+        if path in ['/', '/health', '/healthcheck']:
+            return 200, {'Content-Type': 'application/json'}, b'{"status": "healthy", "service": "yjs-websocket"}'
+        return 404, {'Content-Type': 'text/plain'}, b'Not Found'
+
+    async def handle_connection(self, websocket: WebSocketServerProtocol, path: str = "/") -> None:
+        """Handle both WebSocket and HTTP connections"""
+        # Check if this is an HTTP request (not WebSocket upgrade)
+        if not hasattr(websocket, 'request') or not websocket.request:
+            # This is an HTTP request, handle it
+            try:
+                status, headers, body = await self.handle_http_request(path, {})
+                # For HTTP requests, we can't send response through websocket object
+                # This is a limitation - we need to modify the server setup
+                pass
+            except:
+                pass
+            return
+
+        # This is a WebSocket connection, handle normally
+        await self.handle_client(websocket)
+
     async def run(self) -> None:
-        """Start the Y.js WebSocket server"""
+        """Start the Y.js WebSocket server with HTTP health check support"""
         await self.setup_redis()
-        
+
         logger.info(f"Starting Y.js WebSocket server on ws://{self.host}:{self.port}")
         logger.info("Features: CRDT sync, Awareness, Redis pub/sub (if available)")
-        
-        async with serve(self.handle_client, self.host, self.port):
-            logger.info(f"✓ Y.js server ready at ws://{self.host}:{self.port}")
+
+        # Start both WebSocket server and HTTP health check server
+        websocket_server = serve(self.handle_client, self.host, self.port)
+
+        # Simple HTTP server for health checks
+        async def handle_health_check(reader, writer):
+            """Handle HTTP health check requests"""
+            try:
+                data = await reader.read(1024)
+                request = data.decode()
+                if request.startswith('GET /health') or request.startswith('HEAD /health') or request.startswith('GET / '):
+                    response = 'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{"status": "healthy", "service": "yjs-websocket"}'
+                else:
+                    response = 'HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found'
+                writer.write(response.encode())
+                await writer.drain()
+            except Exception as e:
+                logger.error(f"Health check error: {e}")
+            finally:
+                writer.close()
+
+        # Start HTTP health check server on port 8002
+        health_server = await asyncio.start_server(handle_health_check, self.host, 8002)
+
+        logger.info(f"✓ Y.js WebSocket server ready at ws://{self.host}:{self.port}")
+        logger.info(f"✓ Health check server ready at http://{self.host}:8002/health")
+
+        async with websocket_server, health_server:
             await asyncio.Future()  # Run forever
 
 
