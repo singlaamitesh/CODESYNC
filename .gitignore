@@ -28,7 +28,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -38,6 +37,10 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
+# Python build lib directory (not src/lib)
+/lib/
+**/lib/python*/
 
 # Virtual Environments
 venv/
