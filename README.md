@@ -223,7 +223,7 @@ MIT License - See LICENSE file for details
 
 ## 👤 Author
 
-**Amitesh Singh**
+**Amitesh Gupta**
 
 Built with ❤️ using FastAPI, React, and Y.js
 
