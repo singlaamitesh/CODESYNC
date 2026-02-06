@@ -1,0 +1,45 @@
+# Netlify Configuration for CodeSync AI
+
+[build]
+  # Base directory for the frontend
+  base = "codesync/code-harmony-main"
+  
+  # Build command
+  command = "npm run build"
+  
+  # Publish directory (relative to base)
+  publish = "dist"
+
+[build.environment]
+  # Node version
+  NODE_VERSION = "22.22.0"
+
+# Redirect all routes to index.html for SPA
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Headers for security and proper MIME types
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+[[headers]]
+  for = "*.js"
+  [headers.values]
+    Content-Type = "application/javascript; charset=utf-8"
+
+[[headers]]
+  for = "*.mjs"
+  [headers.values]
+    Content-Type = "application/javascript; charset=utf-8"
+
+[[headers]]
+  for = "*.css"
+  [headers.values]
+    Content-Type = "text/css; charset=utf-8"
