@@ -21,10 +21,7 @@ All critical security issues have been identified and fixed!
 fastapi_backend/.env  ← Protected (not in Git)
 ```
 
-**API Key Value (Keep Secret!):**
-```
-OPENROUTER_API_KEY=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
-```
+**API Key Status:** ✅ Securely stored in `.env` file (not committed to Git)
 
 ---
 
@@ -152,7 +149,7 @@ git commit -m "Initial commit - CodeSync AI (secrets excluded)"
 ### Local Development
 File: `fastapi_backend/.env` (NOT in Git)
 ```env
-OPENROUTER_API_KEY=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
+OPENROUTER_API_KEY=your_openrouter_api_key_here
 DATABASE_URL=postgresql://amitesh@localhost:5432/codesync_db
 REDIS_URL=redis://localhost:6379
 ```
@@ -160,7 +157,7 @@ REDIS_URL=redis://localhost:6379
 ### Production (Render.com)
 **Add via Render Dashboard → Environment Variables:**
 ```
-OPENROUTER_API_KEY=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
+OPENROUTER_API_KEY=your_openrouter_api_key_here
 DATABASE_URL=postgresql://user:pass@neon.tech/db
 REDIS_URL=redis://default:pass@redis.cloud:12345
 FRONTEND_URL=https://your-site.netlify.app
