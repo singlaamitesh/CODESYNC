@@ -74,6 +74,7 @@ const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({ onCursorChang
   const providerRef = useRef<WebsocketProvider | null>(null);
   const bindingRef = useRef<MonacoBinding | null>(null);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const ytextRef = useRef<Y.Text | null>(null);
   
   const [isConnected, setIsConnected] = useState(false);
@@ -85,6 +86,7 @@ const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({ onCursorChang
   const {
     currentDocument,
     updateDocumentContent,
+    saveDocument,
     setIsConnected: setStoreConnected,
     setApplyFixToEditor,
   } = useEditorStore();
@@ -301,6 +303,19 @@ const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({ onCursorChang
       // Update store with current content
       updateDocumentContent(content);
       
+      // Auto-save to database after 3 seconds of no typing
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+      autoSaveTimerRef.current = setTimeout(() => {
+        const state = useEditorStore.getState();
+        const doc = state.currentDocument;
+        if (doc) {
+          console.log('[CRDT] Auto-saving document to database...');
+          state.saveDocument(doc);
+        }
+      }, 3000);
+      
       // Debounced AI analysis - trigger after 1.5 seconds of no typing
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
@@ -317,6 +332,15 @@ const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({ onCursorChang
     return () => {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
+      }
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+      // Save before cleanup
+      const state = useEditorStore.getState();
+      const doc = state.currentDocument;
+      if (doc) {
+        state.saveDocument(doc);
       }
       ytextRef.current = null;
       binding?.destroy();
