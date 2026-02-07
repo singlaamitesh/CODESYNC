@@ -64,7 +64,14 @@ const generateUserName = (): string => {
 };
 
 export const useYjs = (options: UseYjsOptions): UseYjsReturn => {
-  const { documentId, userId, userName, wsUrl = 'ws://127.0.0.1:8001' } = options;
+  const { documentId, userId, userName, wsUrl = import.meta.env.VITE_YJS_WS_URL || 'ws://127.0.0.1:8001' } = options;
+  
+  console.log('[useYjs] WebSocket URL configuration:', {
+    VITE_YJS_WS_URL: import.meta.env.VITE_YJS_WS_URL,
+    wsUrl: wsUrl,
+    isDevelopment: import.meta.env.DEV,
+    isProduction: import.meta.env.PROD
+  });
   
   const [content, setContentState] = useState('');
   const [isConnected, setIsConnected] = useState(false);

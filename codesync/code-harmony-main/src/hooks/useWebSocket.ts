@@ -44,7 +44,17 @@ export const useWebSocket = (documentId: string | null) => {
   const connect = useCallback(() => {
     if (!documentId) return;
 
-    const wsUrl = `ws://127.0.0.1:8000/ws/editor/${documentId}`;
+    // Use environment variable for WebSocket URL, fallback to localhost for development
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+    const wsUrl = baseUrl.replace(/^http/, 'ws') + `/ws/editor/${documentId}`;
+    
+    console.log('[useWebSocket] WebSocket URL configuration:', {
+      VITE_API_BASE_URL: import.meta.env.VITE_API_BASE_URL,
+      baseUrl: baseUrl,
+      wsUrl: wsUrl,
+      isDevelopment: import.meta.env.DEV,
+      isProduction: import.meta.env.PROD
+    });
     
     try {
       wsRef.current = new WebSocket(wsUrl);
