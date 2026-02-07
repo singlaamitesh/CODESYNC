@@ -71,12 +71,13 @@ app.add_middleware(
         "http://127.0.0.1:8081",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "https://bucolic-beignet-577c50.netlify.app",  # Your Netlify domain
-        "https://*.netlify.app",  # Allow all Netlify preview deployments
+        "https://bucolic-beignet-577c50.netlify.app",
+        "https://codesync-ai.netlify.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_origin_regex=r"https://.*\.netlify\.app",  # Allow ALL Netlify subdomains
 )
 
 # Include routers
