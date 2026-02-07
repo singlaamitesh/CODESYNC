@@ -13,6 +13,8 @@
 [build.environment]
   # Node version
   NODE_VERSION = "22.22.0"
+  # Disable secrets scanning for .env.example files
+  SECRETS_SCAN_OMIT_PATHS = ".env.example"
 
 # Redirect all routes to index.html for SPA
 [[redirects]]
