@@ -45,7 +45,8 @@ export const useWebSocket = (documentId: string | null) => {
     if (!documentId) return;
 
     // Use environment variable for WebSocket URL, fallback to localhost for development
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+    // Remove /api suffix from base URL since WebSocket endpoints don't have it
+    const baseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace('/api', '');
     const wsUrl = baseUrl.replace(/^http/, 'ws') + `/ws/editor/${documentId}`;
     
     console.log('[useWebSocket] WebSocket URL configuration:', {
