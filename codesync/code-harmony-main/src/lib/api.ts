@@ -1,5 +1,14 @@
 // API service for connecting to FastAPI backend
+// Environment variables MUST be set in Netlify:
+// VITE_API_BASE_URL and VITE_YJS_WS_URL
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api';
+
+console.log('🔧 API Configuration:', {
+  VITE_API_BASE_URL: import.meta.env.VITE_API_BASE_URL,
+  API_BASE_URL: API_BASE_URL,
+  isDevelopment: import.meta.env.DEV,
+  isProduction: import.meta.env.PROD
+});
 
 interface ApiResponse<T> {
   data: T;
