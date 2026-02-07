@@ -217,8 +217,9 @@ const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({ onCursorChang
     ytextRef.current = ytext; // Store reference for applyFix
     
     // Create WebSocket provider for Y.js sync
-    const wsUrl = 'ws://127.0.0.1:8001'; // Y.js WebSocket server
+    const wsUrl = import.meta.env.VITE_YJS_WS_URL || 'ws://127.0.0.1:8001'; // Y.js WebSocket server
     const roomName = `codesync-${currentDocument.id}`;
+    console.log('[CRDT] Y.js WebSocket URL:', wsUrl, 'Room:', roomName);
     
     const provider = new WebsocketProvider(wsUrl, roomName, ydoc, {
       connect: true,
