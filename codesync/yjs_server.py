@@ -357,43 +357,82 @@ class YjsServer:
 
     async def run(self) -> None:
         """Start the Y.js WebSocket server with HTTP health check support"""
+        import os
         await self.setup_redis()
 
-        logger.info(f"Starting Y.js WebSocket server on ws://{self.host}:{self.port}")
+        # Use PORT env var from Render, fallback to 8001 for local dev
+        port = int(os.environ.get('PORT', self.port))
+
+        logger.info(f"Starting Y.js WebSocket server on ws://{self.host}:{port}")
         logger.info("Features: CRDT sync, Awareness, Redis pub/sub (if available)")
 
-        # Start both WebSocket server and HTTP health check server
-        websocket_server = serve(self.handle_client, self.host, self.port)
-
-        # Simple HTTP server for health checks
-        async def handle_health_check(reader, writer):
-            """Handle HTTP health check requests"""
+        # Handle HTTP health checks on the SAME port as WebSocket
+        # This is required for Render which only exposes one port
+        if WEBSOCKETS_V15:
+            # websockets 15.x: use process_request to intercept HTTP
             try:
-                data = await reader.read(1024)
-                request = data.decode()
-                if request.startswith('GET /health') or request.startswith('HEAD /health') or request.startswith('GET / '):
-                    response = 'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{"status": "healthy", "service": "yjs-websocket"}'
-                else:
-                    response = 'HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found'
-                writer.write(response.encode())
-                await writer.drain()
-            except Exception as e:
-                logger.error(f"Health check error: {e}")
-            finally:
-                writer.close()
+                from websockets.http11 import Response as WsResponse
+            except ImportError:
+                # Fallback: try alternate import path
+                from websockets.legacy.http import Headers
+                WsResponse = None
 
-        # Start HTTP health check server on port 8002
-        health_server = await asyncio.start_server(handle_health_check, self.host, 8002)
+            if WsResponse:
+                async def process_request(connection, request):
+                    """Intercept HTTP requests for health checks before WebSocket upgrade"""
+                    if request.path == '/health' or request.path == '/':
+                        return WsResponse(
+                            200,
+                            'OK',
+                            websockets.datastructures.Headers({
+                                'Content-Type': 'application/json',
+                                'Access-Control-Allow-Origin': '*',
+                            }),
+                            '{"status": "healthy", "service": "yjs-websocket"}'.encode()
+                        )
+                    # Return None to proceed with WebSocket upgrade
+                    return None
+            else:
+                async def process_request(connection, request):
+                    """Fallback: intercept HTTP requests using HTTP response tuple"""
+                    path = request.path if hasattr(request, 'path') else '/'
+                    if path == '/health' or path == '/':
+                        return (200, [('Content-Type', 'application/json'), ('Access-Control-Allow-Origin', '*')], b'{"status": "healthy", "service": "yjs-websocket"}')
+                    return None
+            
+            websocket_server = serve(
+                self.handle_client, 
+                self.host, 
+                port,
+                process_request=process_request,
+                origins=None,  # Allow all origins
+            )
+        else:
+            # Older websockets: use process_request differently
+            async def process_request(path, request_headers):
+                """Intercept HTTP requests for health checks"""
+                if path == '/health' or path == '/':
+                    return (200, [('Content-Type', 'application/json'), ('Access-Control-Allow-Origin', '*')], b'{"status": "healthy", "service": "yjs-websocket"}')
+                return None
+            
+            websocket_server = serve(
+                self.handle_client, 
+                self.host, 
+                port,
+                process_request=process_request,
+                origins=None,
+            )
 
-        logger.info(f"✓ Y.js WebSocket server ready at ws://{self.host}:{self.port}")
-        logger.info(f"✓ Health check server ready at http://{self.host}:8002/health")
+        logger.info(f"✓ Y.js WebSocket + Health check server ready on port {port}")
 
-        async with websocket_server, health_server:
+        async with websocket_server:
             await asyncio.Future()  # Run forever
 
 
 async def main():
-    server = YjsServer(host='0.0.0.0', port=8001)
+    import os
+    port = int(os.environ.get('PORT', 8001))
+    server = YjsServer(host='0.0.0.0', port=port)
     await server.run()
 
 
