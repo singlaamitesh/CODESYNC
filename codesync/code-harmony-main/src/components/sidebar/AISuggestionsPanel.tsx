@@ -275,7 +275,11 @@ const AISuggestionsPanel: React.FC = () => {
     }
 
     try {
-      await requestAIAnalysis(Number(currentDocument.id));
+      await requestAIAnalysis(
+        String(currentDocument.id),
+        currentDocument.content || '',
+        currentDocument.title || '',
+      );
       toast({
         title: "Analysis Complete",
         description: "AI has analyzed your code and found suggestions.",
@@ -304,8 +308,12 @@ const AISuggestionsPanel: React.FC = () => {
     setOptimizationResult(null);
 
     try {
-      const result = await optimizeCode(Number(currentDocument.id));
-      
+      const result = await optimizeCode(
+        String(currentDocument.id),
+        currentDocument.content || '',
+        currentDocument.title || '',
+      );
+
       if (result) {
         setOptimizationResult(result);
         toast({
@@ -333,22 +341,16 @@ const AISuggestionsPanel: React.FC = () => {
   // Apply optimized code - Replace ALL content via Y.Text
   const applyOptimizedCode = useCallback(() => {
     if (!optimizationResult || !currentDocument) return;
-    
+
     const optimizedCode = optimizationResult.optimized_code;
-    
-    // Get the replaceEditorContent function from window (set by CollaborativeEditor)
-    const replaceEditorContent = (window as any).__replaceEditorContent;
-    
+    const replaceEditorContent = useEditorStore.getState().replaceEditorContent;
+
     if (replaceEditorContent) {
-      // Use Y.js CRDT to replace all content (for collaborative editing)
       replaceEditorContent(optimizedCode);
-      console.log('[AI] Applied optimized code via Y.Text CRDT');
     } else {
-      // Fallback: Update via store (less ideal as it doesn't use CRDT)
       updateDocumentContent(optimizedCode);
-      console.log('[AI] Applied optimized code via store (fallback)');
     }
-    
+
     setOptimizationResult(null);
     toast({
       title: "Optimized Code Applied!",
@@ -507,7 +509,7 @@ const AISuggestionsPanel: React.FC = () => {
           {isOptimizing ? (
             <>
               <RefreshCw className="mr-1.5 h-3 w-3 animate-spin" />
-              Optimizing with Gemini...
+              Optimizing...
             </>
           ) : (
             <>
