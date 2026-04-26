@@ -10,17 +10,6 @@ from typing import AsyncGenerator, Dict, List, Optional
 
 import httpx
 
-# Workaround: respx==0.21.1's default httpcore-level mocker leaves request.method
-# as bytes when wrapping httpx 0.28+ requests, which breaks Method('POST').match().
-# Switch the global default to the httpx-level mocker so tests using @respx.mock
-# match POST routes correctly. Production code is unaffected (no respx in prod).
-try:  # pragma: no cover - only relevant in test env
-    from respx import mocks as _respx_mocks  # type: ignore
-
-    _respx_mocks.DEFAULT_MOCKER = "httpx"
-except Exception:
-    pass
-
 logger = logging.getLogger(__name__)
 
 OPENROUTER_URL = os.getenv("OPENROUTER_URL", "https://openrouter.ai/api/v1/chat/completions")
