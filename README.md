@@ -1,232 +1,121 @@
-# CodeSync AI - Real-time Collaborative Code Editor
+# CodeSync AI — Real-time Collaborative Code Editor
 
-A powerful real-time collaborative code editor with AI-powered assistance, built with FastAPI, React, and Y.js CRDT technology.
+A real-time collaborative code editor with AI-powered assistance. PocketBase
+handles auth + storage; FastAPI handles AI + Y.js CRDT sync; Caddy serves the
+React frontend. Designed to run on a single $6/month DigitalOcean droplet.
 
-## 🚀 Features
+## Features
 
-- **Real-time Collaboration**: Multiple users can edit code simultaneously with conflict-free merging
-- **AI Code Analysis**: Intelligent code suggestions, error detection, and optimization
-- **Monaco Editor**: Professional code editing experience with syntax highlighting
-- **Y.js CRDT**: Conflict-free replicated data types for seamless synchronization
-- **WebSocket Communication**: Real-time updates and AI analysis
-- **PostgreSQL Database**: Persistent document storage with embeddings
-- **Redis Integration**: High-performance pub/sub messaging
+- Real-time multi-user editing with Y.js CRDTs (no merge conflicts)
+- AI code analysis, optimization, and completions via OpenRouter
+- Semantic search with LanceDB embedded vector store
+- Email/password auth, workspaces, folders, documents, and chat
+- Single-binary, single-droplet deployment
 
-## 🏗️ Architecture
+## Architecture
 
-### Backend (FastAPI - Port 8000)
-- RESTful API for document management
-- AI analysis endpoints with OpenRouter integration
-- Dual WebSocket system (JSON for AI, Binary for CRDT)
-- PostgreSQL with SQLAlchemy ORM
-- Redis for cross-server synchronization
-
-### Real-time Sync (Y.js Server - Port 8001)
-- CRDT-based document synchronization
-- User awareness and presence indicators
-- Redis pub/sub for horizontal scaling
-
-### Frontend (React + TypeScript - Port 8080)
-- Monaco Editor with Y.js binding
-- Real-time collaborative editing
-- AI suggestions panel
-- File explorer and management
-- Modern UI with TailwindCSS
-
-## 📋 Prerequisites
-
-- Python 3.14+
-- Node.js 18+
-- PostgreSQL 14+
-- Redis Server
-- Git
-
-## 🛠️ Quick Start
-
-### 1. Clone the Repository
-```bash
-git clone https://github.com/singlaamitesh/CODESYNC.git
-cd CODESYNC
+```
+                ┌──────────────────────────────────────┐
+ users ── HTTPS │  Caddy  (TLS, static, reverse proxy) │
+                │   /         → React build            │
+                │   /api/*    → FastAPI :8000          │
+                │   /pb/*     → PocketBase :8090       │
+                │   /ws/*     → FastAPI :8000          │
+                └──────────────────────────────────────┘
 ```
 
-### 2. Backend Setup
+- **PocketBase** — auth, SQLite DB, realtime subscriptions, admin UI.
+- **FastAPI** — AI endpoints + Y.js CRDT WebSocket + LanceDB embeddings.
+- **React + Monaco** — frontend served as static files by Caddy.
+
+## Local development
+
+### Prerequisites
+- Python 3.12+
+- Node.js 18+
+- (No PostgreSQL or Redis required — PocketBase replaces both for this app.)
+
+### 1. Run PocketBase
+
+```bash
+# Download the binary for your platform from https://pocketbase.io/docs/
+# Or run via Docker:
+docker run --rm -p 8090:8090 \
+  -v "$(pwd)/pocketbase/pb_data:/pb/pb_data" \
+  -v "$(pwd)/pocketbase/pb_migrations:/pb/pb_migrations:ro" \
+  $(docker build -q ./pocketbase)
+```
+
+Open `http://127.0.0.1:8090/_/` and create the admin account on first boot.
+
+### 2. Run the FastAPI backend
+
 ```bash
 cd fastapi_backend
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
+
+# Required env vars
+export POCKETBASE_URL=http://127.0.0.1:8090
+export OPENROUTER_API_KEY=sk-or-...      # for AI analyze/optimize/complete
+# Embeddings (optional; enables /api/ai/search)
+export EMBEDDINGS_API_KEY=sk-or-...
+export LANCE_DIR="$(pwd)/.lance"
+
+uvicorn main:app --reload --port 8000
 ```
 
-### 3. Environment Configuration
-```bash
-cp .env.example .env
-# Edit .env with your API keys and database credentials
-```
+### 3. Run the frontend
 
-### 4. Database Setup
 ```bash
-# Create PostgreSQL database
-createdb codesync_db
-
-# Run database migrations (if any)
-# Tables are created automatically on startup
-```
-
-### 5. Frontend Setup
-```bash
-cd ../codesync/code-harmony-main
+cd codesync/code-harmony-main
 npm install
+npm run dev   # http://localhost:8080
 ```
 
-### 6. Start Services
-```bash
-# From project root
-./start.sh
-```
+Vite proxies aren't configured in dev — set `VITE_API_BASE_URL` and
+`VITE_PB_URL` in a `.env.local` if your services run on non-default ports.
 
-### 7. Access the Application
-- **Frontend**: http://localhost:8080
-- **API Docs**: http://localhost:8000/docs
-- **Health Check**: http://localhost:8000/health
+## Production deployment
 
-## 🔧 Environment Variables
+See [`deploy/README.md`](deploy/README.md) for the full droplet setup
+(DigitalOcean $6 plan, Docker Compose, automatic HTTPS via Caddy).
 
-Create a `.env` file in the `fastapi_backend` directory:
-
-```env
-OPENROUTER_API_KEY=your_openrouter_api_key_here
-DATABASE_URL=postgresql://username:password@localhost:5432/codesync_db
-REDIS_URL=redis://localhost:6379
-```
-
-## 🚀 Deployment
-
-### Render Deployment (Recommended)
-
-1. **Connect GitHub Repository**
-   - Go to Render Dashboard
-   - Connect your GitHub repository
-
-2. **Create Services** (in order):
-   - **PostgreSQL Database** → Render PostgreSQL
-   - **Redis Instance** → Render Redis
-   - **FastAPI Backend** → Render Web Service
-   - **React Frontend** → Render Static Site
-
-3. **Environment Variables**
-   - Set production API keys and database URLs in each service
-
-4. **Build Commands**
-   - **Backend**: `pip install -r requirements.txt && uvicorn main:app --host 0.0.0.0 --port $PORT`
-   - **Frontend**: `npm run build`
-
-## 📁 Project Structure
+## Project structure
 
 ```
-CodeSync_AI/
-├── fastapi_backend/          # FastAPI backend
-│   ├── main.py              # Application entry point
-│   ├── .env                 # Environment variables
-│   ├── requirements.txt     # Python dependencies
+CODESYNC/
+├── deploy/                  # Droplet deployment (compose, Caddyfile, env, README)
+├── pocketbase/              # PocketBase Dockerfile + schema migrations
+├── fastapi_backend/         # FastAPI app (AI + Y.js)
+│   ├── main.py
+│   ├── requirements.txt
 │   └── app/
-│       ├── database.py      # Database models
-│       ├── schemas.py       # Pydantic schemas
-│       ├── routers/         # API endpoints
-│       └── services/        # Business logic
-├── codesync/
-│   ├── yjs_server.py       # Y.js WebSocket server
-│   └── code-harmony-main/   # React frontend
-│       ├── package.json
-│       ├── vite.config.ts
-│       └── src/
-│           ├── components/  # React components
-│           ├── hooks/       # Custom hooks
-│           ├── stores/      # State management
-│           └── lib/         # Utilities
-├── start.sh                 # Start all services
-├── stop.sh                  # Stop all services
-└── verify.sh               # Health verification
+│       ├── routers/         # ai.py, websocket.py
+│       ├── services/        # ai_service.py, embeddings.py, pb_auth.py, yjs_manager.py
+│       └── schemas.py
+├── codesync/code-harmony-main/   # React frontend
+│   ├── src/
+│   │   ├── components/
+│   │   ├── hooks/
+│   │   ├── lib/             # pb.ts, api.ts, workspace.ts
+│   │   ├── pages/           # Login.tsx, Index.tsx
+│   │   └── stores/
+│   └── vite.config.ts
+└── docs/superpowers/specs/  # Design specs
 ```
 
-## 🤖 AI Integration
+## AI integration
 
-- **Model**: `arcee-ai/trinity-large-preview:free`
-- **Provider**: OpenRouter API
-- **Features**:
-  - Code analysis and error detection
-  - Intelligent code completion
-  - Code optimization suggestions
-  - Real-time AI assistance
+- **LLM:** any OpenRouter-served model (default: `mistralai/devstral-small:free`).
+- **Embeddings:** any OpenAI-compatible `/embeddings` provider — defaults to
+  OpenRouter's free `nvidia/llama-nemotron-embed-vl-1b-v2:free`.
+- All AI routes require a valid PocketBase JWT (verified by FastAPI).
 
-## 🔒 Security
+## License
 
-- API keys stored securely in environment variables
-- CORS properly configured
-- Input validation with Pydantic
-- No hardcoded secrets in codebase
+MIT — see `LICENSE`.
 
-## 🧪 Testing Multi-User Collaboration
+## Author
 
-```bash
-# Run multi-user test script
-./test_multiuser.sh
-```
-
-This opens multiple browser tabs for testing real-time collaboration.
-
-## 📊 Performance
-
-- **WebSocket Latency**: < 50ms
-- **AI Response Time**: 2-5 seconds
-- **Concurrent Users**: Tested up to 10 users
-- **Database Queries**: Optimized with proper indexing
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-**FastAPI won't start:**
-```bash
-# Check port availability
-lsof -i:8000
-# Kill conflicting process
-pkill -f uvicorn
-```
-
-**Y.js server issues:**
-```bash
-# Check Redis connection
-redis-cli ping
-# Restart Y.js server
-pkill -f yjs_server.py
-```
-
-**AI not working:**
-```bash
-# Verify API key
-cat fastapi_backend/.env | grep OPENROUTER_API_KEY
-# Test API endpoint
-curl http://localhost:8000/api/ai/analyze/1
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## 📄 License
-
-MIT License - See LICENSE file for details
-
-## 👤 Author
-
-**Amitesh Gupta**
-
-Built with ❤️ using FastAPI, React, and Y.js
-
----
-
-**Last Updated**: February 6, 2026
+Amitesh Gupta

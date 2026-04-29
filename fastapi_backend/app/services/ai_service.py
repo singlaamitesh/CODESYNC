@@ -12,11 +12,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# OpenRouter Configuration
+# OpenRouter Configuration — model is configurable via .env
 OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY', '')
-# Using arcee-ai/trinity-large-preview:free model for code analysis
-OPENROUTER_MODEL = 'arcee-ai/trinity-large-preview:free'
-OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
+OPENROUTER_MODEL = os.getenv('OPENROUTER_MODEL', 'meta-llama/llama-3.3-70b-instruct:free')
+OPENROUTER_URL = os.getenv('OPENROUTER_URL', 'https://openrouter.ai/api/v1/chat/completions')
 
 
 class AIService:
@@ -61,21 +60,78 @@ class AIService:
             logger.error(f"[AI] OpenRouter API error: {e}")
             return None
     
+    async def call_openrouter_stream(self, prompt: str, max_tokens: int = 2048, temperature: float = 0.1):
+        """Stream response from OpenRouter API — yields text chunks"""
+        if not self.ready:
+            return
+
+        headers = {
+            'Authorization': f'Bearer {self.api_key}',
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'http://localhost:8080',
+            'X-Title': 'CodeSync AI'
+        }
+
+        data = {
+            'model': self.model,
+            'messages': [{'role': 'user', 'content': prompt}],
+            'max_tokens': max_tokens,
+            'temperature': temperature,
+            'stream': True,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                async with client.stream('POST', OPENROUTER_URL, headers=headers, json=data) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if line.startswith('data: '):
+                            chunk = line[6:]
+                            if chunk == '[DONE]':
+                                return
+                            try:
+                                parsed = json.loads(chunk)
+                                delta = parsed['choices'][0].get('delta', {})
+                                content = delta.get('content', '')
+                                if content:
+                                    yield content
+                            except (json.JSONDecodeError, KeyError, IndexError):
+                                continue
+        except Exception as e:
+            logger.error(f"[AI] OpenRouter stream error: {e}")
+
     def detect_language(self, code: str, filename: Optional[str] = None) -> str:
-        """Detect programming language from filename or code content"""
+        """Detect programming language from filename or code content.
+        For unknown extensions, returns the extension itself (without the dot)
+        so the LLM can be told "treat this as a .po file" rather than guessing.
+        """
         if filename:
             ext_map = {
                 '.py': 'python', '.js': 'javascript', '.jsx': 'javascript',
                 '.ts': 'typescript', '.tsx': 'typescript', '.cpp': 'cpp',
                 '.c': 'c', '.h': 'cpp', '.java': 'java', '.html': 'html',
-                '.css': 'css', '.sql': 'sql', '.go': 'go', '.rs': 'rust',
-                '.rb': 'ruby', '.php': 'php', '.sh': 'bash', '.json': 'json',
+                '.css': 'css', '.scss': 'scss', '.sql': 'sql',
+                '.go': 'go', '.rs': 'rust', '.rb': 'ruby', '.php': 'php',
+                '.sh': 'bash', '.zsh': 'bash', '.bash': 'bash',
+                '.json': 'json', '.yaml': 'yaml', '.yml': 'yaml',
+                '.toml': 'toml', '.md': 'markdown', '.markdown': 'markdown',
+                '.xml': 'xml', '.svg': 'xml',
+                '.po': 'gettext-po', '.pot': 'gettext-po',
+                '.dockerfile': 'dockerfile', '.tf': 'terraform',
+                '.kt': 'kotlin', '.swift': 'swift', '.dart': 'dart',
+                '.lua': 'lua', '.r': 'r', '.scala': 'scala',
+                '.proto': 'protobuf', '.graphql': 'graphql', '.gql': 'graphql',
+                '.env': 'dotenv', '.ini': 'ini', '.cfg': 'ini',
             }
             ext = os.path.splitext(filename.lower())[1]
             if ext in ext_map:
                 return ext_map[ext]
-        
-        # Detect from code content
+            if ext:
+                # Return the bare extension so the LLM gets accurate context
+                # for unknown file types (e.g., proprietary or rare formats).
+                return ext.lstrip('.')
+
+        # Filename absent → fall back to content sniffing
         if 'def ' in code and ':' in code:
             return 'python'
         if 'function ' in code or 'const ' in code:
@@ -84,7 +140,8 @@ class AIService:
             return 'cpp'
         if 'public class' in code:
             return 'java'
-        
+        if code.lstrip().startswith('msgid ') or 'msgstr ' in code:
+            return 'gettext-po'
         return 'text'
     
     def safe_json_parse(self, text: str, default: Any = None) -> Any:
@@ -118,17 +175,29 @@ class AIService:
         """Analyze code for errors and suggestions"""
         if not code or not code.strip():
             return self._empty_analysis()
-        
+
         language = self.detect_language(code, filename)
-        
+
         if not self.ready:
             return self._fallback_analysis(code, language)
-        
-        # Number lines for clarity
+
         lines = code.split('\n')
         numbered_code = '\n'.join([f"{i+1}: {line}" for i, line in enumerate(lines)])
-        
-        prompt = f"""Analyze this {language} code. Find ALL errors and provide FIXED code for each error.
+
+        # Special-case content that isn't program source code so the LLM doesn't
+        # try to "fix" it as if it were Python or JS.
+        non_code_langs = {'gettext-po', 'markdown', 'json', 'yaml', 'toml', 'ini',
+                          'xml', 'dotenv', 'text'}
+        is_code = language not in non_code_langs and not (filename and language not in non_code_langs and language == os.path.splitext(filename.lower())[1].lstrip('.'))
+        intent = (
+            f"Analyze this {language} source code. Find ALL bugs and report each with a fix."
+            if is_code else
+            f"This is a {language} file (filename: {filename or 'unknown'}). "
+            f"Validate its structure/syntax and report ONLY actual problems. "
+            f"Do NOT invent code suggestions if the content is non-executable."
+        )
+
+        prompt = f"""{intent}
 
 CODE:
 {numbered_code}
@@ -136,6 +205,8 @@ CODE:
 Return JSON with this EXACT format:
 {{"suggestions": [{{"type": "error/warning/info", "message": "description", "line": 1, "severity": "error/warning/info", "fix": "corrected line"}}], "analysis": {{"lines": 10, "functions": 2, "classes": 1, "complexity_score": 75}}}}
 
+The "fix" field MUST be the complete replacement for the line at the given line number — same indentation, same number of lines (or use \\n for multi-line). If you have no high-confidence fix, omit the "fix" field.
+If the file has no problems return {{"suggestions": [], "analysis": {{"lines": {len(lines)}, "functions": 0, "classes": 0, "complexity_score": 100}}}}.
 Return ONLY valid JSON, no markdown."""
 
         response_text = await self.call_openrouter(prompt, max_tokens=1500, temperature=0.1)
@@ -230,29 +301,11 @@ Return JSON: {{"completions": [{{"label": "completion", "kind": "function/variab
         h = hashlib.md5(text.encode()).hexdigest()
         return [int(h[i:i+2], 16) / 255.0 for i in range(0, 32, 2)]
     
-    async def search_similar(self, query: str, db, limit: int = 5) -> List[Dict[str, Any]]:
-        """Search for similar documents using embeddings"""
-        from app.database import Document as DBDocument, Embedding as DBEmbedding
-        
-        query_embedding = await self.generate_embedding(query)
-        
-        # Get all documents with embeddings
-        results = []
-        embeddings = db.query(DBEmbedding).limit(100).all()
-        
-        for emb in embeddings:
-            doc = db.query(DBDocument).filter(DBDocument.id == emb.document_id).first()
-            if doc:
-                similarity = self._cosine_similarity(query_embedding, emb.vector)
-                results.append({
-                    "document": doc.to_dict(),
-                    "similarity_score": similarity
-                })
-        
-        # Sort by similarity
-        results.sort(key=lambda x: x['similarity_score'], reverse=True)
-        
-        return results[:limit]
+    async def search_similar(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Semantic search is disabled in the PocketBase deployment.
+        Document storage lives in PocketBase and vector search is out of scope for v1.
+        """
+        return []
     
     def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
         """Calculate cosine similarity between two vectors"""

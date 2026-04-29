@@ -1,141 +1,117 @@
 """
-AI Analysis API endpoints
-Real-time code analysis, optimization, and completions
+AI Analysis API endpoints.
+
+These routes no longer read documents from a database; the frontend passes
+content directly in the request body. This keeps FastAPI free of the
+PocketBase schema.
 """
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
-from app.database import get_db, Document as DBDocument
 from app.schemas import (
-    AIAnalysisResponse, AIAnalysisData,
-    OptimizationResponse, OptimizationData,
-    CompletionRequest, CompletionResponse
+    AnalyzeRequest, AIAnalysisResponse, AIAnalysisData,
+    OptimizeRequest, OptimizationResponse, OptimizationData,
+    CompletionRequest, CompletionResponse,
 )
 from app.services.ai_service import AIService
+from app.services import embeddings as emb
+from app.services.pb_auth import require_pb_auth, PbUser
 import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/analyze/{document_id}", response_model=AIAnalysisResponse)
-async def analyze_code(
-    document_id: int,
-    db: Session = Depends(get_db)
-):
-    """
-    Analyze code for errors, warnings, and suggestions
-    Uses AI to provide real-time feedback
-    """
-    document = db.query(DBDocument).filter(DBDocument.id == document_id).first()
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    ai_service = AIService()
-    result = await ai_service.analyze_code(
-        code=document.content,
-        filename=document.title
-    )
-    
-    # Build response matching frontend's AISuggestionResponse interface
-    suggestion_data = AIAnalysisData(
+@router.post("/analyze", response_model=AIAnalysisResponse)
+async def analyze_code(req: AnalyzeRequest, _user: PbUser = Depends(require_pb_auth)):
+    """Analyze code passed in the request body."""
+    ai = AIService()
+    result = await ai.analyze_code(code=req.content, filename=req.filename)
+
+    data = AIAnalysisData(
         suggestions=result.get("suggestions", []),
         analysis=result.get("analysis", {}),
-        embedding=[]
+        embedding=[],
     )
-    # Inject language and llm info into analysis
-    suggestion_data.analysis["language"] = result.get("language", "text")
-    suggestion_data.analysis["llm_used"] = result.get("llm_used")
-    
-    return AIAnalysisResponse(
-        document_id=document_id,
-        suggestion_data=suggestion_data,
-        status="success"
-    )
+    data.analysis["language"] = result.get("language", "text")
+    data.analysis["llm_used"] = result.get("llm_used")
+
+    return AIAnalysisResponse(document_id=req.document_id, suggestion_data=data)
 
 
-@router.post("/optimize/{document_id}", response_model=OptimizationResponse)
-async def optimize_code(
-    document_id: int,
-    db: Session = Depends(get_db)
-):
-    """
-    Optimize code for better performance and readability
-    Returns optimized version with explanation
-    """
-    document = db.query(DBDocument).filter(DBDocument.id == document_id).first()
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    ai_service = AIService()
-    result = await ai_service.optimize_code(
-        code=document.content,
-        filename=document.title
-    )
-    
+@router.post("/optimize", response_model=OptimizationResponse)
+async def optimize_code(req: OptimizeRequest, _user: PbUser = Depends(require_pb_auth)):
+    ai = AIService()
+    result = await ai.optimize_code(code=req.content, filename=req.filename)
+
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
-    
-    optimization = OptimizationData(
-        optimized_code=result.get("optimized_code", ""),
-        changes=result.get("changes", []),
-        performance_improvement=result.get("performance_improvement", ""),
-        summary=result.get("summary", ""),
-        language=result.get("language", "text"),
-        llm_used=result.get("llm_used")
-    )
-    
+
     return OptimizationResponse(
-        document_id=document_id,
-        optimization=optimization,
-        status="success"
+        document_id=req.document_id,
+        optimization=OptimizationData(
+            optimized_code=result.get("optimized_code", ""),
+            changes=result.get("changes", []),
+            performance_improvement=result.get("performance_improvement", ""),
+            summary=result.get("summary", ""),
+            language=result.get("language", "text"),
+            llm_used=result.get("llm_used"),
+        ),
     )
 
 
-@router.post("/complete/{document_id}", response_model=CompletionResponse)
-async def get_completions(
-    document_id: int,
-    request: CompletionRequest,
-    db: Session = Depends(get_db)
-):
-    """
-    Get AI-powered code completions at cursor position
-    """
-    document = db.query(DBDocument).filter(DBDocument.id == document_id).first()
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    ai_service = AIService()
-    result = await ai_service.get_completions(
-        code=document.content,
-        line=request.line,
-        column=request.column,
-        filename=document.title
+@router.post("/complete", response_model=CompletionResponse)
+async def get_completions(req: CompletionRequest, _user: PbUser = Depends(require_pb_auth)):
+    ai = AIService()
+    result = await ai.get_completions(
+        code=req.content, line=req.line, column=req.column, filename=req.filename,
     )
-    
     return CompletionResponse(
-        document_id=document_id,
+        document_id=req.document_id,
         completions=result.get("completions", []),
-        status="success"
     )
+
+
+class EmbedRequest(BaseModel):
+    document_id: str
+    workspace_id: str = ""
+    title: str = ""
+    content: str
+    updated: str = ""
+
+
+@router.post("/embed")
+async def embed_document(req: EmbedRequest, _user: PbUser = Depends(require_pb_auth)):
+    ok = await emb.upsert_document(
+        document_id=req.document_id,
+        workspace_id=req.workspace_id,
+        title=req.title,
+        content=req.content,
+        updated=req.updated,
+    )
+    return {"indexed": ok}
+
+
+@router.delete("/embed/{document_id}")
+async def delete_embedding(document_id: str, _user: PbUser = Depends(require_pb_auth)):
+    await emb.delete_document(document_id)
+    return {"deleted": True}
 
 
 @router.get("/search")
-async def search_similar(
+async def semantic_search(
     q: str,
+    workspace: str = "",
     limit: int = 5,
-    db: Session = Depends(get_db)
+    _user: PbUser = Depends(require_pb_auth),
 ):
-    """
-    Semantic search for similar documents using embeddings
-    """
-    if not q:
-        raise HTTPException(status_code=400, detail="Query parameter 'q' is required")
-    
-    ai_service = AIService()
-    results = await ai_service.search_similar(q, db, limit)
-    
-    return {
-        "query": q,
-        "results": results
-    }
+    if not q.strip():
+        raise HTTPException(status_code=400, detail="Query is required")
+    results = await emb.search(q, workspace_id=workspace or None, limit=limit)
+    return {"query": q, "results": results}
+
+
+@router.get("/config")
+async def get_ai_config(_user: PbUser = Depends(require_pb_auth)):
+    ai = AIService()
+    return {"model": ai.model, "ready": ai.ready, "provider": "OpenRouter"}

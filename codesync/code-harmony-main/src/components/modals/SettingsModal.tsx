@@ -1,11 +1,10 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Settings,
   Monitor,
   Keyboard,
   Sparkles,
   Bell,
-  Palette,
 } from 'lucide-react';
 import {
   Dialog,
@@ -25,9 +24,21 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useEditorStore } from '@/stores/editorStore';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { apiService } from '@/lib/api';
 
 const SettingsModal: React.FC = () => {
   const { isSettingsOpen, setIsSettingsOpen } = useEditorStore();
+  const { settings, updateSetting } = useSettingsStore();
+  const [aiConfig, setAiConfig] = useState<{ model: string; ready: boolean; provider: string } | null>(null);
+
+  useEffect(() => {
+    if (isSettingsOpen) {
+      apiService.makePublicRequest<{ model: string; ready: boolean; provider: string }>('/ai/config')
+        .then(setAiConfig)
+        .catch(() => {});
+    }
+  }, [isSettingsOpen]);
 
   return (
     <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
@@ -68,13 +79,14 @@ const SettingsModal: React.FC = () => {
                 </div>
                 <div className="flex items-center gap-3">
                   <Slider
-                    defaultValue={[14]}
+                    value={[settings.fontSize]}
+                    onValueChange={([v]) => updateSetting('fontSize', v)}
                     min={10}
                     max={24}
                     step={1}
                     className="w-24"
                   />
-                  <span className="text-sm w-8">14px</span>
+                  <span className="text-sm w-8">{settings.fontSize}px</span>
                 </div>
               </div>
 
@@ -83,7 +95,10 @@ const SettingsModal: React.FC = () => {
                   <Label className="text-sm font-medium">Tab Size</Label>
                   <p className="text-xs text-muted-foreground">Number of spaces per tab</p>
                 </div>
-                <Select defaultValue="2">
+                <Select
+                  value={String(settings.tabSize)}
+                  onValueChange={(v) => updateSetting('tabSize', Number(v))}
+                >
                   <SelectTrigger className="w-20">
                     <SelectValue />
                   </SelectTrigger>
@@ -100,7 +115,10 @@ const SettingsModal: React.FC = () => {
                   <Label className="text-sm font-medium">Word Wrap</Label>
                   <p className="text-xs text-muted-foreground">Wrap long lines</p>
                 </div>
-                <Switch defaultChecked />
+                <Switch
+                  checked={settings.wordWrap}
+                  onCheckedChange={(v) => updateSetting('wordWrap', v)}
+                />
               </div>
 
               <div className="flex items-center justify-between">
@@ -108,7 +126,10 @@ const SettingsModal: React.FC = () => {
                   <Label className="text-sm font-medium">Minimap</Label>
                   <p className="text-xs text-muted-foreground">Show code overview</p>
                 </div>
-                <Switch defaultChecked />
+                <Switch
+                  checked={settings.minimap}
+                  onCheckedChange={(v) => updateSetting('minimap', v)}
+                />
               </div>
 
               <div className="flex items-center justify-between">
@@ -116,52 +137,56 @@ const SettingsModal: React.FC = () => {
                   <Label className="text-sm font-medium">Line Numbers</Label>
                   <p className="text-xs text-muted-foreground">Display line numbers</p>
                 </div>
-                <Switch defaultChecked />
+                <Switch
+                  checked={settings.lineNumbers}
+                  onCheckedChange={(v) => updateSetting('lineNumbers', v)}
+                />
               </div>
             </div>
           </TabsContent>
 
           <TabsContent value="ai" className="space-y-4">
             <div className="space-y-4">
+              {aiConfig && (
+                <div className="rounded-lg border border-border bg-muted/30 p-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <Label className="text-sm font-medium">Active Model</Label>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${aiConfig.ready ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'}`}>
+                      {aiConfig.ready ? 'Connected' : 'Not configured'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground font-mono">{aiConfig.model}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1">Provider: {aiConfig.provider} &middot; Change via OPENROUTER_MODEL in .env</p>
+                </div>
+              )}
+
               <div className="flex items-center justify-between">
                 <div>
-                  <Label className="text-sm font-medium">AI Suggestions</Label>
-                  <p className="text-xs text-muted-foreground">Enable real-time suggestions</p>
+                  <Label className="text-sm font-medium">Auto-Analysis</Label>
+                  <p className="text-xs text-muted-foreground">Analyze code as you type</p>
                 </div>
-                <Switch defaultChecked />
+                <Switch
+                  checked={settings.autoAnalysis}
+                  onCheckedChange={(v) => updateSetting('autoAnalysis', v)}
+                />
               </div>
 
               <div className="flex items-center justify-between">
                 <div>
-                  <Label className="text-sm font-medium">Auto-complete</Label>
-                  <p className="text-xs text-muted-foreground">AI-powered code completion</p>
+                  <Label className="text-sm font-medium">Analysis Delay</Label>
+                  <p className="text-xs text-muted-foreground">Seconds after typing stops</p>
                 </div>
-                <Switch defaultChecked />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="text-sm font-medium">Error Detection</Label>
-                  <p className="text-xs text-muted-foreground">Highlight potential issues</p>
+                <div className="flex items-center gap-3">
+                  <Slider
+                    value={[settings.analysisDelay / 1000]}
+                    onValueChange={([v]) => updateSetting('analysisDelay', v * 1000)}
+                    min={0.5}
+                    max={5}
+                    step={0.5}
+                    className="w-24"
+                  />
+                  <span className="text-sm w-8">{(settings.analysisDelay / 1000).toFixed(1)}s</span>
                 </div>
-                <Switch defaultChecked />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="text-sm font-medium">Suggestion Confidence</Label>
-                  <p className="text-xs text-muted-foreground">Minimum confidence threshold</p>
-                </div>
-                <Select defaultValue="70">
-                  <SelectTrigger className="w-24">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="50">50%</SelectItem>
-                    <SelectItem value="70">70%</SelectItem>
-                    <SelectItem value="90">90%</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
             </div>
           </TabsContent>
@@ -170,61 +195,27 @@ const SettingsModal: React.FC = () => {
             <div className="space-y-3">
               <div className="flex items-center justify-between py-2 border-b border-border">
                 <span className="text-sm">Save</span>
-                <kbd className="px-2 py-1 bg-muted rounded text-xs font-mono">⌘ S</kbd>
+                <kbd className="px-2 py-1 bg-muted rounded text-xs font-mono">Cmd S</kbd>
               </div>
               <div className="flex items-center justify-between py-2 border-b border-border">
                 <span className="text-sm">Find</span>
-                <kbd className="px-2 py-1 bg-muted rounded text-xs font-mono">⌘ F</kbd>
+                <kbd className="px-2 py-1 bg-muted rounded text-xs font-mono">Cmd F</kbd>
               </div>
               <div className="flex items-center justify-between py-2 border-b border-border">
                 <span className="text-sm">Command Palette</span>
-                <kbd className="px-2 py-1 bg-muted rounded text-xs font-mono">⌘ ⇧ P</kbd>
+                <kbd className="px-2 py-1 bg-muted rounded text-xs font-mono">Cmd Shift P</kbd>
               </div>
               <div className="flex items-center justify-between py-2 border-b border-border">
                 <span className="text-sm">Toggle Sidebar</span>
-                <kbd className="px-2 py-1 bg-muted rounded text-xs font-mono">⌘ B</kbd>
-              </div>
-              <div className="flex items-center justify-between py-2 border-b border-border">
-                <span className="text-sm">AI Suggestions</span>
-                <kbd className="px-2 py-1 bg-muted rounded text-xs font-mono">⌘ I</kbd>
+                <kbd className="px-2 py-1 bg-muted rounded text-xs font-mono">Cmd B</kbd>
               </div>
             </div>
           </TabsContent>
 
           <TabsContent value="notifications" className="space-y-4">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="text-sm font-medium">Collaborator Joins</Label>
-                  <p className="text-xs text-muted-foreground">When someone joins the document</p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="text-sm font-medium">Chat Messages</Label>
-                  <p className="text-xs text-muted-foreground">New messages in chat</p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="text-sm font-medium">AI Alerts</Label>
-                  <p className="text-xs text-muted-foreground">Critical AI suggestions</p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label className="text-sm font-medium">Sound Effects</Label>
-                  <p className="text-xs text-muted-foreground">Notification sounds</p>
-                </div>
-                <Switch />
-              </div>
-            </div>
+            <p className="text-sm text-muted-foreground">
+              Notification settings will be available after authentication is implemented.
+            </p>
           </TabsContent>
         </Tabs>
       </DialogContent>

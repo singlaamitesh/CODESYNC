@@ -219,3 +219,6 @@ docker-compose.override.yml
 
 # Local configuration
 local_settings.py
+
+# Local skill outputs
+.superpowers/

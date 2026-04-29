@@ -15,9 +15,13 @@ import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { MonacoBinding } from 'y-monaco';
 import { useEditorStore } from '@/stores/editorStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { pb } from '@/lib/pb';
 import { Loader2, Users, Wifi, WifiOff, Bot } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+const devLog = import.meta.env.DEV ? console.log.bind(console) : () => {};
 
 interface CollaborativeEditorProps {
   onCursorChange?: (line: number, column: number) => void;
@@ -89,68 +93,58 @@ const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({ onCursorChang
     saveDocument,
     setIsConnected: setStoreConnected,
     setApplyFixToEditor,
+    setReplaceEditorContent,
   } = useEditorStore();
   
+  const { settings } = useSettingsStore();
+
   // WebSocket for AI analysis (separate from Y.js CRDT sync)
   const { sendEdit } = useWebSocket(currentDocument?.id?.toString() || null);
   
-  // Function to apply a fix to a specific line via Y.js CRDT
+  // Function to apply a fix to a specific line via Y.js CRDT.
+  // Supports multi-line fixes (AI returns "\n" in the replacement). Preserves
+  // the original line's leading indentation only when the AI's fix is itself
+  // un-indented — if the AI deliberately changed indentation, we honor it.
   const applyFixToLine = useCallback((lineNumber: number, newLineContent: string) => {
     const ytext = ytextRef.current;
     const editor = editorRef.current;
-    
+
     if (!ytext || !editor) {
       console.error('[CRDT] Cannot apply fix: Y.Text or editor not initialized');
       return;
     }
-    
+
     const content = ytext.toString();
     const lines = content.split('\n');
-    
+
     if (lineNumber < 1 || lineNumber > lines.length) {
       console.error(`[CRDT] Invalid line number: ${lineNumber}`);
       return;
     }
-    
-    // Calculate the start and end positions of the line
+
+    // Compute the byte offset of the start of the target line.
     let startPos = 0;
     for (let i = 0; i < lineNumber - 1; i++) {
-      startPos += lines[i].length + 1; // +1 for newline
+      startPos += lines[i].length + 1; // +1 for the newline
     }
     const oldLine = lines[lineNumber - 1];
-    
-    // Preserve indentation from original line
-    const indent = oldLine.match(/^\s*/)?.[0] || '';
-    const fixedLine = indent + newLineContent.trim();
-    
-    console.log(`[CRDT] Applying fix to line ${lineNumber}:`);
-    console.log(`  Old: "${oldLine}"`);
-    console.log(`  New: "${fixedLine}"`);
-    
-    // Use Y.js transaction to delete and insert atomically
+    const oldIndent = oldLine.match(/^\s*/)?.[0] || '';
+
+    // Treat the AI's fix as authoritative for indentation if it has any
+    // leading whitespace itself; otherwise re-apply the original line's indent.
+    const fixHasLeadingSpace = /^\s/.test(newLineContent);
+    const replacement = fixHasLeadingSpace
+      ? newLineContent.replace(/\n+$/, '')
+      : oldIndent + newLineContent.trim();
+
+    devLog(`[CRDT] Applying fix to line ${lineNumber}:`);
+    devLog(`  Old: ${JSON.stringify(oldLine)}`);
+    devLog(`  New: ${JSON.stringify(replacement)}`);
+
     ydocRef.current?.transact(() => {
       ytext.delete(startPos, oldLine.length);
-      ytext.insert(startPos, fixedLine);
+      ytext.insert(startPos, replacement);
     });
-    
-    // Also update the Monaco editor model directly as a backup
-    // (Y.js binding should do this automatically, but just in case)
-    const model = editor.getModel();
-    if (model) {
-      const range = {
-        startLineNumber: lineNumber,
-        startColumn: 1,
-        endLineNumber: lineNumber,
-        endColumn: oldLine.length + 1,
-      };
-      editor.executeEdits('ai-fix', [{
-        range,
-        text: fixedLine,
-        forceMoveMarkers: true,
-      }]);
-    }
-    
-    console.log('[CRDT] Fix applied successfully');
   }, []);
   
   // Function to replace ALL content (for code optimization)
@@ -165,7 +159,7 @@ const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({ onCursorChang
     
     const currentLength = ytext.length;
     
-    console.log(`[CRDT] Replacing all content (${currentLength} chars → ${newContent.length} chars)`);
+    devLog(`[CRDT] Replacing all content (${currentLength} chars → ${newContent.length} chars)`);
     
     // Use Y.js transaction to delete all and insert new content atomically
     ydocRef.current?.transact(() => {
@@ -177,19 +171,18 @@ const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({ onCursorChang
       ytext.insert(0, newContent);
     });
     
-    console.log('[CRDT] All content replaced successfully');
+    devLog('[CRDT] All content replaced successfully');
   }, []);
   
-  // Register the applyFix function in the store so AISuggestionsPanel can use it
+  // Register editor functions in the store so AISuggestionsPanel can use them
   useEffect(() => {
     setApplyFixToEditor(applyFixToLine);
-    // Also store the replaceAllContent function (we'll add it to the store)
-    (window as any).__replaceEditorContent = replaceAllContent;
+    setReplaceEditorContent(replaceAllContent);
     return () => {
       setApplyFixToEditor(null);
-      (window as any).__replaceEditorContent = null;
+      setReplaceEditorContent(null);
     };
-  }, [applyFixToLine, setApplyFixToEditor, replaceAllContent]);
+  }, [applyFixToLine, setApplyFixToEditor, replaceAllContent, setReplaceEditorContent]);
   
   // Reset editorReady when document changes (editor will re-mount due to key prop)
   useEffect(() => {
@@ -199,7 +192,7 @@ const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({ onCursorChang
   // Set up Y.js when document changes AND editor is ready
   useEffect(() => {
     if (!currentDocument || !editorReady || !editorRef.current || !monacoRef.current) {
-      console.log('[CRDT] Waiting for:', {
+      devLog('[CRDT] Waiting for:', {
         document: !!currentDocument,
         editorReady,
         editorRef: !!editorRef.current,
@@ -218,13 +211,17 @@ const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({ onCursorChang
     const ytext = ydoc.getText('monaco');
     ytextRef.current = ytext; // Store reference for applyFix
     
-    // Create WebSocket provider for Y.js sync
-    const wsUrl = import.meta.env.VITE_YJS_WS_URL || 'ws://127.0.0.1:8001'; // Y.js WebSocket server
+    // Y.js WebSocket now lives on the FastAPI backend: /ws/yjs/{room}?token=...
+    // In production the FastAPI service is behind Caddy at the same origin.
+    const apiBase = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace('/api', '');
+    const wsUrl = (import.meta.env.VITE_YJS_WS_URL || apiBase).replace(/^http/, 'ws') + '/ws/yjs';
     const roomName = `codesync-${currentDocument.id}`;
-    console.log('[CRDT] Y.js WebSocket URL:', wsUrl, 'Room:', roomName);
-    
+    const token = pb.authStore.token;
+    devLog('[CRDT] Y.js WebSocket URL:', wsUrl, 'Room:', roomName);
+
     const provider = new WebsocketProvider(wsUrl, roomName, ydoc, {
       connect: true,
+      params: token ? { token } : {},
     });
     providerRef.current = provider;
     
@@ -241,20 +238,20 @@ const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({ onCursorChang
       const connected = event.status === 'connected';
       setIsConnected(connected);
       setStoreConnected(connected);
-      console.log(`[CRDT] Connection status: ${event.status} (User: ${userName})`);
+      devLog(`[CRDT] Connection status: ${event.status} (User: ${userName})`);
     });
     
     // Listen for sync status
     provider.on('sync', (synced: boolean) => {
       setIsSynced(synced);
-      console.log(`[CRDT] Sync status: ${synced ? 'synced' : 'syncing'}`);
+      devLog(`[CRDT] Sync status: ${synced ? 'synced' : 'syncing'}`);
       
       // When synced, check if Y.Text needs initialization from database
       if (synced && ytext.length === 0 && currentDocument.content && currentDocument.content.length > 0) {
         ytext.insert(0, currentDocument.content);
-        console.log(`[CRDT] Initialized Y.Text with ${currentDocument.content.length} chars from database`);
+        devLog(`[CRDT] Initialized Y.Text with ${currentDocument.content.length} chars from database`);
       } else if (synced && ytext.length > 0) {
-        console.log(`[CRDT] Y.Text already populated: ${ytext.length} chars (from other users or previous session)`);
+        devLog(`[CRDT] Y.Text already populated: ${ytext.length} chars (from other users or previous session)`);
       }
     });
     
@@ -287,13 +284,13 @@ const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({ onCursorChang
       // Log delta operations for debugging
       event.changes.delta.forEach((delta, index) => {
         if (delta.insert) {
-          console.log(`[CRDT Delta] Insert: "${String(delta.insert).substring(0, 20)}..."`);
+          devLog(`[CRDT Delta] Insert: "${String(delta.insert).substring(0, 20)}..."`);
         }
         if (delta.delete) {
-          console.log(`[CRDT Delta] Delete: ${delta.delete} chars`);
+          devLog(`[CRDT Delta] Delete: ${delta.delete} chars`);
         }
         if (delta.retain) {
-          console.log(`[CRDT Delta] Retain: ${delta.retain} chars`);
+          devLog(`[CRDT Delta] Retain: ${delta.retain} chars`);
         }
       });
       
@@ -311,7 +308,7 @@ const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({ onCursorChang
         const state = useEditorStore.getState();
         const doc = state.currentDocument;
         if (doc) {
-          console.log('[CRDT] Auto-saving document to database...');
+          devLog('[CRDT] Auto-saving document to database...');
           state.saveDocument(doc);
         }
       }, 3000);
@@ -321,12 +318,12 @@ const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({ onCursorChang
         clearTimeout(debounceTimerRef.current);
       }
       debounceTimerRef.current = setTimeout(() => {
-        console.log('[CRDT] Triggering AI analysis after debounce');
+        devLog('[CRDT] Triggering AI analysis after debounce');
         sendEdit(content);
       }, 1500);
     });
     
-    console.log(`[CRDT] Initialized Y.js for document ${currentDocument.id}`);
+    devLog(`[CRDT] Initialized Y.js for document ${currentDocument.id}`);
     
     // Cleanup on unmount or document change
     return () => {
@@ -346,7 +343,7 @@ const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({ onCursorChang
       binding?.destroy();
       provider?.destroy();
       ydoc?.destroy();
-      console.log('[CRDT] Cleaned up Y.js');
+      devLog('[CRDT] Cleaned up Y.js');
     };
   }, [currentDocument?.id, editorReady, setStoreConnected, updateDocumentContent, sendEdit]);
 
@@ -354,39 +351,46 @@ const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({ onCursorChang
     editorRef.current = editor;
     monacoRef.current = monaco;
     
-    console.log('[CRDT] Monaco editor mounted');
+    devLog('[CRDT] Monaco editor mounted');
 
-    // Configure editor theme
+    // Midnight Pro editor theme
     monaco.editor.defineTheme('codesync-dark', {
       base: 'vs-dark',
       inherit: true,
       rules: [
-        { token: 'comment', foreground: '6b7280', fontStyle: 'italic' },
+        { token: 'comment', foreground: '475569', fontStyle: 'italic' },
         { token: 'keyword', foreground: 'c084fc' },
         { token: 'string', foreground: '86efac' },
         { token: 'number', foreground: 'fbbf24' },
-        { token: 'type', foreground: '60a5fa' },
-        { token: 'function', foreground: '38bdf8' },
+        { token: 'type', foreground: '67e8f9' },
+        { token: 'function', foreground: '818cf8' },
         { token: 'variable', foreground: 'e2e8f0' },
+        { token: 'delimiter', foreground: '94a3b8' },
+        { token: 'operator', foreground: '94a3b8' },
+        { token: 'tag', foreground: 'f472b6' },
+        { token: 'attribute.name', foreground: '818cf8' },
+        { token: 'attribute.value', foreground: '86efac' },
       ],
       colors: {
-        'editor.background': '#16161e',
+        'editor.background': '#131325',
         'editor.foreground': '#e2e8f0',
-        'editor.lineHighlightBackground': '#3b82f615',
-        'editor.selectionBackground': '#3b82f640',
-        'editorCursor.foreground': '#3b82f6',
-        'editorLineNumber.foreground': '#4b5563',
-        'editorLineNumber.activeForeground': '#9ca3af',
-        'editor.inactiveSelectionBackground': '#3b82f620',
-        'editorIndentGuide.background': '#374151',
-        'editorIndentGuide.activeBackground': '#4b5563',
-        'editorWidget.background': '#1e1e2e',
-        'editorWidget.border': '#374151',
-        'editorSuggestWidget.background': '#1e1e2e',
-        'editorSuggestWidget.border': '#374151',
-        'editorSuggestWidget.selectedBackground': '#3b82f630',
-        'editorHoverWidget.background': '#1e1e2e',
-        'editorHoverWidget.border': '#374151',
+        'editor.lineHighlightBackground': '#6366f108',
+        'editor.selectionBackground': '#6366f130',
+        'editorCursor.foreground': '#6366f1',
+        'editorLineNumber.foreground': '#2e2e4a',
+        'editorLineNumber.activeForeground': '#6366f1',
+        'editor.inactiveSelectionBackground': '#6366f115',
+        'editorIndentGuide.background': '#1e1e3a',
+        'editorIndentGuide.activeBackground': '#2e2e5a',
+        'editorWidget.background': '#0f0f20',
+        'editorWidget.border': '#1e1e3a',
+        'editorSuggestWidget.background': '#0f0f20',
+        'editorSuggestWidget.border': '#1e1e3a',
+        'editorSuggestWidget.selectedBackground': '#6366f125',
+        'editorHoverWidget.background': '#0f0f20',
+        'editorHoverWidget.border': '#1e1e3a',
+        'editorBracketMatch.background': '#6366f120',
+        'editorBracketMatch.border': '#6366f150',
       },
     });
 
@@ -502,11 +506,11 @@ const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({ onCursorChang
           </div>
         }
         options={{
-          fontSize: 14,
+          fontSize: settings.fontSize,
           fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
           fontLigatures: true,
-          lineNumbers: 'on',
-          minimap: { enabled: true, scale: 1 },
+          lineNumbers: settings.lineNumbers ? 'on' : 'off',
+          minimap: { enabled: settings.minimap, scale: 1 },
           scrollBeyondLastLine: false,
           smoothScrolling: true,
           cursorBlinking: 'smooth',
@@ -516,9 +520,9 @@ const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({ onCursorChang
           autoIndent: 'full',
           formatOnPaste: true,
           formatOnType: true,
-          tabSize: 2,
-          wordWrap: 'on',
-          lineHeight: 1.6,
+          tabSize: settings.tabSize,
+          wordWrap: settings.wordWrap ? 'on' : 'off',
+          lineHeight: 1.7,
           padding: { top: 16, bottom: 16 },
           glyphMargin: true,
           folding: true,
@@ -530,8 +534,8 @@ const CollaborativeEditor: React.FC<CollaborativeEditorProps> = ({ onCursorChang
           scrollbar: {
             vertical: 'visible',
             horizontal: 'visible',
-            verticalScrollbarSize: 10,
-            horizontalScrollbarSize: 10,
+            verticalScrollbarSize: 8,
+            horizontalScrollbarSize: 8,
           },
         }}
       />

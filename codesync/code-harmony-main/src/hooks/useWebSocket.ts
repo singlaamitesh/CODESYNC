@@ -1,6 +1,9 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
 import type { AISuggestion, CodeStats } from '@/stores/editorStore';
+import { pb } from '@/lib/pb';
+
+const devLog = import.meta.env.DEV ? console.log.bind(console) : () => {};
 
 interface WebSocketMessage {
   type: string;
@@ -44,12 +47,16 @@ export const useWebSocket = (documentId: string | null) => {
   const connect = useCallback(() => {
     if (!documentId) return;
 
-    // Use environment variable for WebSocket URL, fallback to localhost for development
-    // Remove /api suffix from base URL since WebSocket endpoints don't have it
+    // In production, Caddy serves /ws on the same origin. In dev, fall back to localhost:8000.
     const baseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace('/api', '');
-    const wsUrl = baseUrl.replace(/^http/, 'ws') + `/ws/editor/${documentId}`;
+    const token = pb.authStore.token;
+    if (!token) {
+      devLog('[useWebSocket] skipping connect: no auth token');
+      return;
+    }
+    const wsUrl = `${baseUrl.replace(/^http/, 'ws')}/ws/editor/${documentId}?token=${encodeURIComponent(token)}`;
     
-    console.log('[useWebSocket] WebSocket URL configuration:', {
+    devLog('[useWebSocket] WebSocket URL configuration:', {
       VITE_API_BASE_URL: import.meta.env.VITE_API_BASE_URL,
       baseUrl: baseUrl,
       wsUrl: wsUrl,
@@ -61,13 +68,13 @@ export const useWebSocket = (documentId: string | null) => {
       wsRef.current = new WebSocket(wsUrl);
 
       wsRef.current.onopen = () => {
-        console.log('WebSocket connected to document', documentId);
+        devLog('WebSocket connected to document', documentId);
         setIsConnected(true);
         setIsReconnecting(false);
       };
 
       wsRef.current.onclose = () => {
-        console.log('WebSocket disconnected');
+        devLog('WebSocket disconnected');
         setIsConnected(false);
         
         // Attempt to reconnect after 3 seconds
@@ -96,11 +103,11 @@ export const useWebSocket = (documentId: string | null) => {
   }, [documentId, setIsConnected]);
 
   const handleMessage = (message: WebSocketMessage) => {
-    console.log('WebSocket message:', message.type, message);
+    devLog('WebSocket message:', message.type, message);
     
     switch (message.type) {
       case 'connection':
-        console.log('Connected:', message.message);
+        devLog('Connected:', message.message);
         break;
         
       case 'ai_status':
@@ -144,7 +151,7 @@ export const useWebSocket = (documentId: string | null) => {
           setAISuggestions(suggestions);
           setIsAIAnalyzing(false);
           setAiStatus({ isAnalyzing: false, isOptimizing: false, message: '' });
-          console.log('AI suggestions updated:', suggestions);
+          devLog('AI suggestions updated:', suggestions);
         }
         break;
         
@@ -176,7 +183,7 @@ export const useWebSocket = (documentId: string | null) => {
         break;
         
       case 'embedding_complete':
-        console.log('Embedding generated:', message.data);
+        devLog('Embedding generated:', message.data);
         break;
         
       case 'edit':
@@ -184,13 +191,13 @@ export const useWebSocket = (documentId: string | null) => {
         // Handle collaborative edits from other users
         if (message.user_type === 'human') {
           // Update editor content (collaborative editing)
-          console.log('Collaborative edit received');
+          devLog('Collaborative edit received');
         }
         break;
         
       case 'cursor_update':
         // Other user's cursor position
-        console.log('Cursor update:', message);
+        devLog('Cursor update:', message);
         break;
         
       case 'pong':
@@ -198,7 +205,7 @@ export const useWebSocket = (documentId: string | null) => {
         break;
         
       default:
-        console.log('Unknown message type:', message.type);
+        devLog('Unknown message type:', message.type);
     }
   };
 

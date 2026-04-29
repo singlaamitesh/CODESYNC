@@ -1,0 +1,59 @@
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - ../codesync/code-harmony-main/dist:/srv/web:ro
+    depends_on:
+      - pocketbase
+      - fastapi
+    mem_limit: 64m
+
+  pocketbase:
+    build:
+      context: ../pocketbase
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - pb_data:/pb/pb_data
+      - ../pocketbase/pb_migrations:/pb/pb_migrations:ro
+    expose:
+      - "8090"
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8090/api/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  fastapi:
+    build:
+      context: ../fastapi_backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      POCKETBASE_URL: http://pocketbase:8090
+      FRONTEND_URL: ${FRONTEND_URL}
+      LANCE_DIR: /var/lance
+    volumes:
+      - lance_data:/var/lance
+    expose:
+      - "8000"
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+    mem_limit: 384m
+
+volumes:
+  caddy_data:
+  caddy_config:
+  pb_data:
+  lance_data:

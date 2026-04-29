@@ -1,59 +1,74 @@
 import { create } from 'zustand';
 import { apiService } from '../lib/api';
-import type { Document as ApiDocument, AISuggestionResponse } from '../lib/api';
+import {
+  createDocument as pbCreateDocument,
+  deleteDocument as pbDeleteDocument,
+  listAllDocuments,
+  updateDocument as pbUpdateDocument,
+} from '../lib/workspace';
+
+// Debounce embedding calls per-document so rapid saves coalesce into one embed.
+const _embedTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const EMBED_DEBOUNCE_MS = 10_000;
+
+function scheduleEmbed(doc: {
+  id: string; title: string; content: string; workspaceId?: string; updatedAt: string;
+}) {
+  const existing = _embedTimers.get(doc.id);
+  if (existing) clearTimeout(existing);
+  const t = setTimeout(() => {
+    _embedTimers.delete(doc.id);
+    apiService
+      .embedDocument({
+        document_id: doc.id,
+        workspace_id: doc.workspaceId || '',
+        title: doc.title,
+        content: doc.content,
+        updated: doc.updatedAt,
+      })
+      .catch((err) => {
+        if (import.meta.env.DEV) console.warn('Embedding failed (non-fatal):', err);
+      });
+  }, EMBED_DEBOUNCE_MS);
+  _embedTimers.set(doc.id, t);
+}
 
 // Language detection function
 function detectLanguage(content: string): string {
   const code = content.toLowerCase();
-  
-  // Python
+
   if (/\bdef\s+\w+\s*\(/.test(content) || /\bimport\s+\w+/.test(content) || /\bprint\s*\(/.test(content)) {
     return 'python';
   }
-  
-  // TypeScript
   if (/\binterface\s+\w+/.test(content) || /:\s*(string|number|boolean)/.test(code) || /\btype\s+\w+\s*=/.test(content)) {
     return 'typescript';
   }
-  
-  // JavaScript
   if (/\bfunction\s+\w+/.test(content) || /\bconst\s+\w+/.test(content) || /\blet\s+\w+/.test(content) || /=>/.test(content) || /console\.log/.test(content)) {
     return 'javascript';
   }
-  
-  // Java
   if (/\bpublic\s+class/.test(content) || /System\.out\.println/.test(content)) {
     return 'java';
   }
-  
-  // C/C++
   if (/#include\s*</.test(content) || /\bint\s+main\s*\(/.test(content)) {
     return 'cpp';
   }
-  
-  // HTML
   if (/<html/i.test(content) || /<div/i.test(content) || /<!DOCTYPE/i.test(content)) {
     return 'html';
   }
-  
-  // CSS
   if (/[.#]\w+\s*\{/.test(content) && /:\s*\w+;/.test(content)) {
     return 'css';
   }
-  
-  // SQL
   if (/\b(SELECT|INSERT|UPDATE|DELETE|CREATE TABLE)\b/i.test(content)) {
     return 'sql';
   }
-  
-  // JSON
   if (/^\s*[\[{]/.test(content) && /[\]}]\s*$/.test(content)) {
     try {
       JSON.parse(content);
       return 'json';
-    } catch {}
+    } catch {
+      /* not json */
+    }
   }
-  
   return 'text';
 }
 
@@ -64,17 +79,19 @@ export interface AISuggestion {
   description: string;
   line?: number;
   code?: string;
-  fix?: string;  // The corrected code to replace the problematic line
+  fix?: string;
   confidence: number;
 }
 
 export interface Document {
-  id: string | number;
+  id: string;
   title: string;
   content: string;
   language: string;
   createdAt: string;
   updatedAt: string;
+  workspaceId?: string;
+  folderId?: string | null;
 }
 
 export interface CodeStats {
@@ -84,85 +101,107 @@ export interface CodeStats {
   complexity: number;
 }
 
+export interface Tab {
+  id: string;
+  documentId: string;
+  title: string;
+  language: string;
+  isDirty: boolean;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+}
+
 interface EditorState {
-  // Document state
   currentDocument: Document | null;
   documents: Document[];
-  
-  // AI
+
+  openTabs: Tab[];
+  activeTabId: string | null;
+
+  currentWorkspace: Workspace | null;
+
   aiSuggestions: AISuggestion[];
   isAIAnalyzing: boolean;
   codeStats: CodeStats;
-  
-  // UI state
+
   isSidebarOpen: boolean;
-  activePanel: 'explorer' | 'ai';
+  activePanel: 'explorer' | 'ai' | 'chat';
   isSettingsOpen: boolean;
-  
-  // Connection
+
   isConnected: boolean;
   isSaving: boolean;
   lastSaved: string | null;
-  
-  // Y.js editor reference for applying fixes
+
   applyFixToEditor: ((line: number, newContent: string) => void) | null;
-  
-  // Actions
+  replaceEditorContent: ((newContent: string) => void) | null;
+
   setCurrentDocument: (doc: Document | null) => void;
   updateDocumentContent: (content: string) => void;
   setAISuggestions: (suggestions: AISuggestion[]) => void;
   setIsAIAnalyzing: (analyzing: boolean) => void;
   setCodeStats: (stats: CodeStats) => void;
   toggleSidebar: () => void;
-  setActivePanel: (panel: 'explorer' | 'ai') => void;
+  setActivePanel: (panel: 'explorer' | 'ai' | 'chat') => void;
   setIsConnected: (connected: boolean) => void;
   setIsSaving: (saving: boolean) => void;
   setLastSaved: (time: string | null) => void;
   setIsSettingsOpen: (open: boolean) => void;
   setApplyFixToEditor: (fn: ((line: number, newContent: string) => void) | null) => void;
-  
-  // API Actions
+  setReplaceEditorContent: (fn: ((newContent: string) => void) | null) => void;
+
+  openTab: (doc: Document) => void;
+  closeTab: (tabId: string) => void;
+  setActiveTab: (tabId: string) => void;
+  reorderTabs: (tabs: Tab[]) => void;
+  markTabDirty: (tabId: string, dirty: boolean) => void;
+
+  setCurrentWorkspace: (ws: Workspace | null) => void;
+
   loadDocuments: () => Promise<void>;
   createDocument: (title: string, content: string) => Promise<void>;
+  deleteDocument: (id: string) => Promise<void>;
   saveDocument: (doc: Document) => Promise<void>;
-  requestAIAnalysis: (documentId: number) => Promise<void>;
-  optimizeCode: (documentId: number) => Promise<{ optimized_code: string; changes: any[]; summary: string } | null>;
-  searchSimilarDocuments: (query: string) => Promise<any>;
+  requestAIAnalysis: (documentId: string, content: string, filename: string) => Promise<void>;
+  optimizeCode: (documentId: string, content: string, filename: string) => Promise<{ optimized_code: string; changes: any[]; summary: string } | null>;
+  searchSimilarDocuments: (query: string) => Promise<Array<{ id: string; title: string; workspace: string; score: number }>>;
 }
 
-export const useEditorStore = create<EditorState>((set) => ({
-  // Document state - start empty, will load from API
+export const useEditorStore = create<EditorState>((set, get) => ({
   currentDocument: null,
   documents: [],
-  
-  // AI - start with no suggestions
+
+  openTabs: [],
+  activeTabId: null,
+
+  currentWorkspace: null,
+
   aiSuggestions: [],
   isAIAnalyzing: false,
   codeStats: { lines: 0, functions: 0, classes: 0, complexity: 0 },
-  
-  // UI state
+
   isSidebarOpen: true,
   activePanel: 'explorer',
   isSettingsOpen: false,
-  
-  // Connection
-  isConnected: true,
+
+  isConnected: false,
   isSaving: false,
   lastSaved: null,
-  
-  // Y.js editor reference for applying fixes
+
   applyFixToEditor: null,
-  
-  // Actions
+  replaceEditorContent: null,
+
   setCurrentDocument: (doc) => set({ currentDocument: doc }),
   updateDocumentContent: (content) =>
     set((state) => ({
       currentDocument: state.currentDocument
-        ? { 
-            ...state.currentDocument, 
-            content, 
+        ? {
+            ...state.currentDocument,
+            content,
             language: detectLanguage(content),
-            updatedAt: new Date().toISOString() 
+            updatedAt: new Date().toISOString(),
           }
         : null,
     })),
@@ -176,89 +215,173 @@ export const useEditorStore = create<EditorState>((set) => ({
   setLastSaved: (time) => set({ lastSaved: time }),
   setIsSettingsOpen: (open) => set({ isSettingsOpen: open }),
   setApplyFixToEditor: (fn) => set({ applyFixToEditor: fn }),
+  setReplaceEditorContent: (fn) => set({ replaceEditorContent: fn }),
 
-  // API Actions Implementation
+  openTab: (doc) => {
+    const state = get();
+    const docId = doc.id;
+    const existingTab = state.openTabs.find((t) => t.documentId === docId);
+    if (existingTab) {
+      set({ activeTabId: existingTab.id, currentDocument: doc });
+      return;
+    }
+    const newTab: Tab = {
+      id: `tab-${docId}-${Date.now()}`,
+      documentId: docId,
+      title: doc.title,
+      language: doc.language,
+      isDirty: false,
+    };
+    set({
+      openTabs: [...state.openTabs, newTab],
+      activeTabId: newTab.id,
+      currentDocument: doc,
+    });
+  },
+
+  closeTab: (tabId) => {
+    const state = get();
+    const remaining = state.openTabs.filter((t) => t.id !== tabId);
+    if (state.activeTabId === tabId) {
+      const idx = state.openTabs.findIndex((t) => t.id === tabId);
+      const nextTab = remaining[Math.min(idx, remaining.length - 1)];
+      if (nextTab) {
+        const nextDoc = state.documents.find((d) => d.id === nextTab.documentId);
+        set({ openTabs: remaining, activeTabId: nextTab.id, currentDocument: nextDoc || null });
+      } else {
+        set({ openTabs: [], activeTabId: null, currentDocument: null });
+      }
+    } else {
+      set({ openTabs: remaining });
+    }
+  },
+
+  setActiveTab: (tabId) => {
+    const state = get();
+    const tab = state.openTabs.find((t) => t.id === tabId);
+    if (tab) {
+      const doc = state.documents.find((d) => d.id === tab.documentId);
+      set({ activeTabId: tabId, currentDocument: doc || null });
+    }
+  },
+
+  reorderTabs: (tabs) => set({ openTabs: tabs }),
+
+  markTabDirty: (tabId, dirty) =>
+    set((state) => ({
+      openTabs: state.openTabs.map((t) => (t.id === tabId ? { ...t, isDirty: dirty } : t)),
+    })),
+
+  setCurrentWorkspace: (ws) => set({ currentWorkspace: ws }),
+
   loadDocuments: async () => {
     try {
-      const docs = await apiService.getDocuments();
-      const convertedDocs: Document[] = docs.map(doc => ({
-        id: doc.id.toString(),
+      const docs = await listAllDocuments();
+      set({
+        documents: docs.map((d) => ({
+          id: d.id,
+          title: d.title,
+          content: d.content,
+          language: d.language || detectLanguage(d.content),
+          createdAt: d.created,
+          updatedAt: d.updated,
+          workspaceId: d.workspace,
+          folderId: d.folder ?? null,
+        })),
+      });
+    } catch (err) {
+      console.error('Failed to load documents:', err);
+    }
+  },
+
+  createDocument: async (title, content) => {
+    set({ isSaving: true });
+    try {
+      const ws = get().currentWorkspace;
+      const lang = detectLanguage(content);
+      const created = await pbCreateDocument(ws?.id || null, title, content, lang);
+      const doc: Document = {
+        id: created.id,
+        title: created.title,
+        content: created.content,
+        language: created.language || lang,
+        createdAt: created.created,
+        updatedAt: created.updated,
+        workspaceId: created.workspace,
+        folderId: created.folder ?? null,
+      };
+      set((state) => ({
+        documents: [...state.documents, doc],
+        currentDocument: doc,
+        isSaving: false,
+        lastSaved: new Date().toISOString(),
+      }));
+      scheduleEmbed(doc);
+    } catch (err) {
+      set({ isSaving: false });
+      console.error('Failed to create document:', err);
+      throw err;  // surface the real reason to the caller's toast
+    }
+  },
+
+  deleteDocument: async (id) => {
+    try {
+      await pbDeleteDocument(id);
+      apiService.deleteEmbedding(id).catch(() => { /* non-fatal */ });
+      set((state) => ({
+        documents: state.documents.filter((d) => d.id !== id),
+        currentDocument: state.currentDocument?.id === id ? null : state.currentDocument,
+        openTabs: state.openTabs.filter((t) => t.documentId !== id),
+      }));
+    } catch (err) {
+      console.error('Failed to delete document:', err);
+    }
+  },
+
+  saveDocument: async (doc) => {
+    try {
+      set({ isSaving: true });
+      const updated = await pbUpdateDocument(doc.id, {
         title: doc.title,
         content: doc.content,
-        language: detectLanguage(doc.content), // Auto-detect language
-        createdAt: doc.created_at,
-        updatedAt: doc.updated_at,
-      }));
-      set({ documents: convertedDocs });
-    } catch (error) {
-      console.error('Failed to load documents:', error);
-    }
-  },
-
-  createDocument: async (title: string, content: string) => {
-    try {
-      set({ isSaving: true });
-      const newDoc = await apiService.createDocument(title, content);
-      const convertedDoc: Document = {
-        id: newDoc.id.toString(),
-        title: newDoc.title,
-        content: newDoc.content,
-        language: detectLanguage(newDoc.content),
-        createdAt: newDoc.created_at,
-        updatedAt: newDoc.updated_at,
-      };
-      
-      set((state) => ({
-        documents: [...state.documents, convertedDoc],
-        currentDocument: convertedDoc,
-        isSaving: false,
-        lastSaved: new Date().toISOString(),
-      }));
-    } catch (error) {
-      console.error('Failed to create document:', error);
-      set({ isSaving: false });
-    }
-  },
-
-  saveDocument: async (doc: Document) => {
-    try {
-      set({ isSaving: true });
-      const docId = typeof doc.id === 'string' ? parseInt(doc.id) : doc.id;
-      const updatedDoc = await apiService.updateDocument(docId, doc.title, doc.content);
-      
-      const convertedDoc: Document = {
-        id: updatedDoc.id.toString(),
-        title: updatedDoc.title,
-        content: updatedDoc.content,
         language: doc.language,
-        createdAt: updatedDoc.created_at,
-        updatedAt: updatedDoc.updated_at,
+      });
+      const converted: Document = {
+        id: updated.id,
+        title: updated.title,
+        content: updated.content,
+        language: updated.language,
+        createdAt: updated.created,
+        updatedAt: updated.updated,
+        workspaceId: updated.workspace,
+        folderId: updated.folder ?? null,
       };
-
       set((state) => ({
-        documents: state.documents.map(d => d.id === doc.id ? convertedDoc : d),
-        currentDocument: state.currentDocument?.id === doc.id ? convertedDoc : state.currentDocument,
+        documents: state.documents.map((d) => (d.id === doc.id ? converted : d)),
+        currentDocument: state.currentDocument?.id === doc.id ? converted : state.currentDocument,
         isSaving: false,
         lastSaved: new Date().toISOString(),
       }));
-    } catch (error) {
-      console.error('Failed to save document:', error);
+      scheduleEmbed(converted);
+    } catch (err) {
+      console.error('Failed to save document:', err);
       set({ isSaving: false });
     }
   },
 
-  requestAIAnalysis: async (documentId: number) => {
+  requestAIAnalysis: async (documentId, content, filename) => {
     try {
       set({ isAIAnalyzing: true });
-      const result = await apiService.getAISuggestions(documentId);
-      
+      const result = await apiService.analyzeCode(documentId, content, filename);
+
       if (result.status === 'success' && result.suggestion_data) {
         const suggestions: AISuggestion[] = result.suggestion_data.suggestions.map((s, index) => ({
           id: `ai-${documentId}-${index}`,
-          type: s.type as 'error' | 'best-practice' | 'refactoring' | 'documentation' | 'security',
+          type: s.type as AISuggestion['type'],
           title: s.type.toUpperCase(),
           description: s.message,
           line: s.line,
+          fix: s.fix,
           confidence: s.severity === 'error' ? 0.9 : s.severity === 'warning' ? 0.7 : 0.5,
         }));
 
@@ -269,24 +392,21 @@ export const useEditorStore = create<EditorState>((set) => ({
           complexity: result.suggestion_data.analysis.complexity_score,
         };
 
-        set({ 
-          aiSuggestions: suggestions,
-          codeStats: stats,
-          isAIAnalyzing: false 
-        });
+        set({ aiSuggestions: suggestions, codeStats: stats, isAIAnalyzing: false });
+      } else {
+        set({ isAIAnalyzing: false });
       }
-    } catch (error) {
-      console.error('Failed to get AI analysis:', error);
+    } catch (err) {
+      console.error('Failed to get AI analysis:', err);
       set({ isAIAnalyzing: false });
     }
   },
 
-  optimizeCode: async (documentId: number) => {
+  optimizeCode: async (documentId, content, filename) => {
     try {
       set({ isAIAnalyzing: true });
-      const result = await apiService.optimizeCode(documentId);
+      const result = await apiService.optimizeCode(documentId, content, filename);
       set({ isAIAnalyzing: false });
-      
       if (result.status === 'success' && result.optimization) {
         return {
           optimized_code: result.optimization.optimized_code,
@@ -295,21 +415,24 @@ export const useEditorStore = create<EditorState>((set) => ({
         };
       }
       return null;
-    } catch (error) {
-      console.error('Failed to optimize code:', error);
+    } catch (err) {
+      console.error('Failed to optimize:', err);
       set({ isAIAnalyzing: false });
       return null;
     }
   },
 
-  searchSimilarDocuments: async (query: string) => {
+  searchSimilarDocuments: async (query) => {
     try {
-      const results = await apiService.searchSimilar(query);
-      console.log('Similar documents:', results);
-      return results;
-    } catch (error) {
-      console.error('Failed to search similar documents:', error);
-      return null;
+      const ws = get().currentWorkspace;
+      const result = await apiService.searchSimilar(query, {
+        workspace: ws?.id,
+        limit: 5,
+      });
+      return result.results;
+    } catch (err) {
+      console.error('Search failed:', err);
+      return [];
     }
   },
 }));

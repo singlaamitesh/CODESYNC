@@ -54,9 +54,9 @@ const CommandPalette: React.FC<CommandPaletteProps> = ({ open, onOpenChange }) =
             <Sparkles className="mr-2 h-4 w-4" />
             Open AI Suggestions
           </CommandItem>
-          <CommandItem onSelect={() => runCommand(() => { setActivePanel('collaborators'); toggleSidebar(); })}>
+          <CommandItem onSelect={() => runCommand(() => { setActivePanel('ai'); toggleSidebar(); })}>
             <Users className="mr-2 h-4 w-4" />
-            Open Collaborators
+            Open AI Panel
           </CommandItem>
         </CommandGroup>
 
