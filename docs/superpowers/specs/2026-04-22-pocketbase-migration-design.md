@@ -12,7 +12,7 @@ Replace OAuth + PostgreSQL with PocketBase (email/password auth + SQLite data la
 - **Auth:** Google/GitHub OAuth replaced with PocketBase email/password.
 - **Database:** PostgreSQL + SQLAlchemy replaced with PocketBase collections (SQLite).
 - **Dropped services:** Redis (no pub/sub needed on a single node).
-- **Deployment:** Netlify + Render replaced by one DO droplet running everything via Docker Compose + Caddy.
+- **Deployment:** one DigitalOcean droplet running everything via Docker Compose + Caddy.
 - **Data:** Fresh start — no migration. All users re-sign-up.
 
 ## Non-Goals

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Files,
   Sparkles,
+  MessageCircle,
   ChevronLeft,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -10,6 +11,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useEditorStore } from '@/stores/editorStore';
 import FileExplorer from './FileExplorer';
 import AISuggestionsPanel from './AISuggestionsPanel';
+import ChatPanel from './ChatPanel';
 import { cn } from '@/lib/utils';
 
 const sidebarVariants = {
@@ -28,6 +30,7 @@ const Sidebar: React.FC = () => {
   const navItems = [
     { id: 'explorer' as const, icon: Files, label: 'Explorer', badge: 0 },
     { id: 'ai' as const, icon: Sparkles, label: 'AI Suggestions', badge: aiSuggestions.length },
+    { id: 'chat' as const, icon: MessageCircle, label: 'Chat', badge: 0 },
   ];
 
   const renderPanel = () => {
@@ -36,6 +39,8 @@ const Sidebar: React.FC = () => {
         return <FileExplorer />;
       case 'ai':
         return <AISuggestionsPanel />;
+      case 'chat':
+        return <ChatPanel />;
       default:
         return <FileExplorer />;
     }
@@ -43,8 +48,8 @@ const Sidebar: React.FC = () => {
 
   return (
     <div className="flex h-full">
-      {/* Icon bar */}
-      <div className="flex w-12 flex-col items-center border-r border-border bg-sidebar py-2">
+      {/* Activity bar */}
+      <div className="flex w-12 flex-col items-center border-r border-border bg-[#0b0b16] py-2">
         {navItems.map((item) => (
           <Tooltip key={item.id}>
             <TooltipTrigger asChild>
@@ -75,7 +80,7 @@ const Sidebar: React.FC = () => {
                 {activePanel === item.id && isSidebarOpen && (
                   <motion.div
                     layoutId="sidebar-indicator"
-                    className="absolute left-0 h-6 w-0.5 rounded-r-full bg-primary"
+                    className="absolute left-0 h-6 w-[3px] rounded-r-full bg-primary"
                   />
                 )}
               </motion.button>

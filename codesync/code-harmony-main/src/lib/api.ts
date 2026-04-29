@@ -1,36 +1,67 @@
-// API service for connecting to FastAPI backend
-// Environment variables MUST be set in Netlify:
-// VITE_API_BASE_URL and VITE_YJS_WS_URL
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api';
+// API service for connecting to FastAPI backend.
+// All business data (workspaces, folders, documents, chat) lives in PocketBase
+// and is accessed directly via the SDK in src/lib/pb.ts. This module is now
+// only responsible for AI endpoints and exposes thin PocketBase-backed types
+// used by the frontend.
+import { pb } from './pb';
 
-console.log('🔧 API Configuration:', {
-  VITE_API_BASE_URL: import.meta.env.VITE_API_BASE_URL,
-  API_BASE_URL: API_BASE_URL,
-  isDevelopment: import.meta.env.DEV,
-  isProduction: import.meta.env.PROD
-});
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.DEV ? 'http://127.0.0.1:8000/api' : '/api');
 
-interface ApiResponse<T> {
-  data: T;
-  error?: string;
+if (import.meta.env.DEV) {
+  console.log('API Configuration:', { API_BASE_URL });
 }
 
-interface Document {
-  id: number;
+export interface Document {
+  id: string;
   title: string;
   content: string;
-  created_at: string;
-  updated_at: string;
+  language: string;
+  workspace?: string;
+  folder?: string | null;
+  created: string;
+  updated: string;
 }
 
-interface AISuggestionResponse {
-  document_id: number;
+export interface WorkspaceResponse {
+  id: string;
+  name: string;
+  created: string;
+}
+
+export interface FolderResponse {
+  id: string;
+  workspace: string;
+  parent: string | null;
+  name: string;
+  created: string;
+}
+
+export interface FolderTreeNode {
+  id: string;
+  name: string;
+  parent_folder_id: string | null;
+  children: FolderTreeNode[];
+  documents: Document[];
+}
+
+export interface WorkspaceTree {
+  id: string;
+  name: string;
+  folders: FolderTreeNode[];
+  root_documents: Document[];
+}
+
+export interface AISuggestionResponse {
+  document_id: string;
   suggestion_data: {
     suggestions: Array<{
       type: string;
       message: string;
       line: number;
       severity: string;
+      fix?: string;
     }>;
     analysis: {
       lines: number;
@@ -39,22 +70,17 @@ interface AISuggestionResponse {
       complexity_score: number;
       language?: string;
       llm_used?: string | null;
-      summary?: string;
-      next_suggestion?: string;
     };
     embedding: number[];
   };
   status: string;
 }
 
-interface OptimizationResponse {
-  document_id: number;
+export interface OptimizationResponse {
+  document_id: string;
   optimization: {
     optimized_code: string;
-    changes: Array<{
-      description: string;
-      impact: string;
-    }>;
+    changes: Array<{ description: string; impact: string }>;
     performance_improvement: string;
     summary: string;
     language?: string;
@@ -63,121 +89,75 @@ interface OptimizationResponse {
   status: string;
 }
 
-interface CompletionResponse {
-  document_id: number;
-  completions: Array<{
-    text: string;
-    description: string;
-  }>;
+export interface CompletionResponse {
+  document_id: string;
+  completions: Array<{ text?: string; label?: string; description?: string }>;
   status: string;
 }
 
-interface EmbeddingResponse {
-  id: number;
-  vector: number[];
-  created_at: string;
-  document: number;
-}
-
 class ApiService {
-  private async makeRequest<T>(
-    endpoint: string,
-    options: RequestInit = {}
-  ): Promise<T> {
+  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
-    
-    const defaultHeaders = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
+      ...((options.headers as Record<string, string>) || {}),
     };
-
-    const config: RequestInit = {
-      headers: { ...defaultHeaders, ...options.headers },
-      ...options,
-    };
-
-    try {
-      const response = await fetch(url, config);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      // Handle empty responses (like DELETE)
-      const text = await response.text();
-      if (!text) {
-        return {} as T;
-      }
-      
-      return JSON.parse(text);
-    } catch (error) {
-      console.error('API request failed:', error);
-      throw error;
+    if (pb.authStore.isValid && pb.authStore.token) {
+      headers.Authorization = `Bearer ${pb.authStore.token}`;
     }
+    const resp = await fetch(url, { ...options, headers });
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}: ${await resp.text().catch(() => '')}`);
+    }
+    const text = await resp.text();
+    return text ? (JSON.parse(text) as T) : ({} as T);
   }
 
-  // Document operations
-  async getDocuments(): Promise<Document[]> {
-    return this.makeRequest<Document[]>('/documents/');
+  async makePublicRequest<T>(endpoint: string): Promise<T> {
+    return this.request<T>(endpoint);
   }
 
-  async getDocument(id: number): Promise<Document> {
-    return this.makeRequest<Document>(`/documents/${id}/`);
-  }
-
-  async createDocument(title: string, content: string): Promise<Document> {
-    return this.makeRequest<Document>('/documents/', {
+  async analyzeCode(documentId: string, content: string, filename: string): Promise<AISuggestionResponse> {
+    return this.request('/ai/analyze', {
       method: 'POST',
-      body: JSON.stringify({ title, content }),
+      body: JSON.stringify({ document_id: documentId, content, filename }),
     });
   }
 
-  async updateDocument(id: number, title: string, content: string): Promise<Document> {
-    return this.makeRequest<Document>(`/documents/${id}/`, {
-      method: 'PUT',
-      body: JSON.stringify({ title, content }),
-    });
-  }
-
-  async deleteDocument(id: number): Promise<void> {
-    return this.makeRequest<void>(`/documents/${id}/`, {
-      method: 'DELETE',
-    });
-  }
-
-  // AI operations  
-  async getAISuggestions(documentId: number): Promise<AISuggestionResponse> {
-    return this.makeRequest<AISuggestionResponse>(`/ai/analyze/${documentId}`, {
+  async optimizeCode(documentId: string, content: string, filename: string): Promise<OptimizationResponse> {
+    return this.request('/ai/optimize', {
       method: 'POST',
+      body: JSON.stringify({ document_id: documentId, content, filename }),
     });
   }
 
-  async optimizeCode(documentId: number): Promise<OptimizationResponse> {
-    return this.makeRequest<OptimizationResponse>(`/ai/optimize/${documentId}`, {
+  async getCompletions(documentId: string, content: string, line: number, column: number, filename: string): Promise<CompletionResponse> {
+    return this.request('/ai/complete', {
       method: 'POST',
+      body: JSON.stringify({ document_id: documentId, content, line, column, filename }),
     });
   }
 
-  async getCompletions(documentId: number, line: number, column: number): Promise<CompletionResponse> {
-    return this.makeRequest<CompletionResponse>(`/ai/complete/${documentId}`, {
+  async embedDocument(params: { document_id: string; workspace_id?: string; title?: string; content: string; updated?: string }): Promise<{ indexed: boolean }> {
+    return this.request('/ai/embed', {
       method: 'POST',
-      body: JSON.stringify({ line, column }),
+      body: JSON.stringify(params),
     });
   }
 
-  async searchSimilar(query: string): Promise<any> {
-    return this.makeRequest<any>(`/ai/search?q=${encodeURIComponent(query)}`);
+  async deleteEmbedding(documentId: string): Promise<{ deleted: boolean }> {
+    return this.request(`/ai/embed/${encodeURIComponent(documentId)}`, { method: 'DELETE' });
   }
 
-  // Embedding operations
-  async getEmbeddings(): Promise<EmbeddingResponse[]> {
-    return this.makeRequest<EmbeddingResponse[]>('/embeddings/');
-  }
-
-  async getDocumentEmbedding(documentId: number): Promise<EmbeddingResponse[]> {
-    const embeddings = await this.getEmbeddings();
-    return embeddings.filter(embedding => embedding.document === documentId);
+  async searchSimilar(query: string, opts: { workspace?: string; limit?: number } = {}): Promise<{
+    query: string;
+    results: Array<{ id: string; title: string; workspace: string; score: number }>;
+  }> {
+    const p = new URLSearchParams({ q: query });
+    if (opts.workspace) p.set('workspace', opts.workspace);
+    if (opts.limit) p.set('limit', String(opts.limit));
+    return this.request(`/ai/search?${p.toString()}`);
   }
 }
 
 export const apiService = new ApiService();
-export type { Document, AISuggestionResponse, OptimizationResponse, CompletionResponse, EmbeddingResponse };

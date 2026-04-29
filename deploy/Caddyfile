@@ -1,0 +1,30 @@
+{$DOMAIN} {
+	encode gzip
+
+	# PocketBase admin + API
+	handle_path /pb/* {
+		reverse_proxy pocketbase:8090
+	}
+
+	# FastAPI WebSockets (Y.js + editor)
+	@ws path /ws/*
+	handle @ws {
+		reverse_proxy fastapi:8000
+	}
+
+	# FastAPI REST (AI routes, health)
+	handle /api/* {
+		reverse_proxy fastapi:8000
+	}
+
+	handle /health {
+		reverse_proxy fastapi:8000
+	}
+
+	# Static React build — SPA fallback
+	handle {
+		root * /srv/web
+		try_files {path} /index.html
+		file_server
+	}
+}
