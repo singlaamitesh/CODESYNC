@@ -222,3 +222,7 @@ local_settings.py
 
 # Local skill outputs
 .superpowers/
+.gstack/
+scripts/.run/
+pocketbase/pocketbase
+pocketbase/pb_data/

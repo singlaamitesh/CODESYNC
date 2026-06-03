@@ -67,12 +67,12 @@ cd /opt
 git clone https://github.com/<you>/codesync.git
 cd codesync
 
-# Build the React bundle so Caddy can serve it from ./codesync/code-harmony-main/dist
+# Build the React bundle so Caddy can serve it from ./frontend/dist
 apt-get install -y nodejs npm
-cd codesync/code-harmony-main
+cd frontend
 npm install
 npm run build
-cd ../..
+cd ..
 ```
 
 ## 6. Configure environment
@@ -115,7 +115,7 @@ On first boot:
 ```bash
 cd /opt/codesync
 git pull
-cd codesync/code-harmony-main && npm install && npm run build && cd ../..
+cd frontend && npm install && npm run build && cd ..
 cd deploy
 docker compose up -d --build
 ```
