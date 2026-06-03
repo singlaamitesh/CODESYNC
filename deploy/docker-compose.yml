@@ -2,6 +2,8 @@ services:
   caddy:
     image: caddy:2.8-alpine
     restart: unless-stopped
+    env_file:
+      - .env
     ports:
       - "80:80"
       - "443:443"
@@ -9,7 +11,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-      - ../codesync/code-harmony-main/dist:/srv/web:ro
+      - ../frontend/dist:/srv/web:ro
     depends_on:
       - pocketbase
       - fastapi
@@ -34,7 +36,7 @@ services:
 
   fastapi:
     build:
-      context: ../fastapi_backend
+      context: ../backend
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file:

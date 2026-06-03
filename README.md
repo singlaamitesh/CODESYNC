@@ -51,7 +51,7 @@ Open `http://127.0.0.1:8090/_/` and create the admin account on first boot.
 ### 2. Run the FastAPI backend
 
 ```bash
-cd fastapi_backend
+cd backend
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
@@ -68,7 +68,7 @@ uvicorn main:app --reload --port 8000
 ### 3. Run the frontend
 
 ```bash
-cd codesync/code-harmony-main
+cd frontend
 npm install
 npm run dev   # http://localhost:8080
 ```
@@ -87,21 +87,25 @@ See [`deploy/README.md`](deploy/README.md) for the full droplet setup
 CODESYNC/
 ├── deploy/                  # Droplet deployment (compose, Caddyfile, env, README)
 ├── pocketbase/              # PocketBase Dockerfile + schema migrations
-├── fastapi_backend/         # FastAPI app (AI + Y.js)
+├── backend/                 # FastAPI app — modular architecture
 │   ├── main.py
-│   ├── requirements.txt
 │   └── app/
-│       ├── routers/         # ai.py, websocket.py
-│       ├── services/        # ai_service.py, embeddings.py, pb_auth.py, yjs_manager.py
-│       └── schemas.py
-├── codesync/code-harmony-main/   # React frontend
-│   ├── src/
-│   │   ├── components/
-│   │   ├── hooks/
-│   │   ├── lib/             # pb.ts, api.ts, workspace.ts
-│   │   ├── pages/           # Login.tsx, Index.tsx
-│   │   └── stores/
-│   └── vite.config.ts
+│       └── modules/         # one self-contained package per domain
+│           ├── ai/          #   router + schemas + pipeline/ (core, infra, operations)
+│           ├── chat/        #   router + chat_stream + retrieval/ (chunking, embeddings)
+│           ├── collab/      #   router (websocket) + yjs_manager
+│           └── auth/        #   pb_auth
+├── frontend/                # React frontend — feature-based architecture
+│   └── src/
+│       ├── app/             # bootstrap: main.tsx, App.tsx, routing
+│       ├── features/        # one folder per capability (components colocated)
+│       │   ├── editor/      #   CollaborativeEditor + theme/identity/statusbar
+│       │   ├── ai-chat/     #   chat panel, composer, message list
+│       │   ├── ai-review/   #   AI suggestions panel + cards
+│       │   ├── files/       #   file explorer + tree nodes
+│       │   └── settings/    #   settings modal
+│       ├── shared/          # cross-cutting: ui/, lib/(api,pb,utils), stores/, hooks/, layout/
+│       └── pages/           # route screens that compose features
 └── docs/superpowers/specs/  # Design specs
 ```
 
